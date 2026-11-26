@@ -43,12 +43,18 @@ main { flex: 1; width: 100%; }
 .avatar { width: 5rem; height: 5rem; border-radius: 50%; object-fit: cover; aspect-ratio: 1; border: 2px solid var(--accent); padding: 3px; background: var(--bg); }
 .handle { margin: 0; font-size: 1.1rem; font-weight: 800; line-height: 1.2; overflow-wrap: anywhere; }
 .follow {
-  display: inline-flex; align-items: center; min-height: 44px; margin-top: .6rem; padding: 0 1rem; background: var(--accent); color: var(--accent-fg);
-  font-weight: 700; font-size: .9rem; text-decoration: none; border-radius: 6px;
+  display: inline-flex; align-items: center; justify-content: center; min-height: 50px; margin-top: .6rem; padding: 0 1.5rem; background: var(--accent); color: var(--accent-fg);
+  font-weight: 800; font-size: 1rem; text-decoration: none; border-radius: 8px; white-space: nowrap;
 }
 .follow:hover { background: var(--fg); color: var(--bg); }
-.actions { display: flex; flex-wrap: wrap; align-items: center; gap: .5rem; margin-top: .6rem; }
-.actions .follow { margin-top: 0; }
+/* Seguir e Compartilhar sempre na mesma linha; Seguir é maior e ocupa o espaço que sobra. */
+.actions { display: flex; flex-wrap: nowrap; align-items: stretch; gap: .6rem; margin-top: .6rem; }
+.actions .follow { margin-top: 0; flex: 1 1 auto; min-width: 0; }
+.actions .share { flex: 0 0 auto; min-height: 50px; border-radius: 8px; white-space: nowrap; }
+/* No celular a linha dos botões ocupa a largura toda, abaixo do avatar e do @. */
+.profile-main { display: contents; }
+.profile-main .actions { grid-column: 1 / -1; }
+.sentinela { height: 1px; }
 .share { display: inline-flex; align-items: center; gap: .4rem; min-height: 44px; padding: 0 1rem; background: transparent; border: 1px solid var(--line); color: var(--fg); font-weight: 700; font-size: .9rem; border-radius: 6px; cursor: pointer; }
 .share:hover { border-color: var(--accent); }
 .share svg { width: 1.1rem; height: 1.1rem; }
@@ -99,13 +105,11 @@ main { flex: 1; width: 100%; }
 }
 .status { padding: 3rem 1rem; text-align: center; color: var(--muted); }
 .status strong { display: block; color: var(--fg); font-size: 1.05rem; margin-bottom: .3rem; }
-.status button, .more {
+.status button {
   margin-top: 1rem; padding: .65rem 1.3rem; min-height: 44px; background: transparent; border: 1px solid var(--accent); color: var(--accent);
   font-weight: 700; border-radius: 6px; cursor: pointer;
 }
-.status button:hover, .more:hover { background: var(--accent); color: var(--accent-fg); }
-.more-wrap { text-align: center; padding-top: 1.5rem; }
-.more[disabled] { opacity: .5; cursor: wait; }
+.status button:hover { background: var(--accent); color: var(--accent-fg); }
 .skel li { animation: pulse 1.4s ease-in-out infinite; }
 @keyframes pulse { 50% { opacity: .5; } }
 
@@ -247,7 +251,8 @@ footer a:hover { color: var(--fg); }
   .profile { grid-template-columns: 9.5rem 1fr; gap: .9rem 2.5rem; padding: 2.5rem 0 0; align-items: start; }
   .avatar { width: 9.5rem; height: 9.5rem; grid-row: 1 / span 3; }
   .handle { font-size: 1.35rem; }
-  .profile-main { grid-column: 2; grid-row: 1; }
+  .profile-main { display: block; grid-column: 2; grid-row: 1; }
+  .profile-main .actions { grid-column: auto; max-width: 26rem; }
   .stats { grid-column: 2; grid-row: 2; border: 0; padding: 0; justify-content: flex-start; gap: 2.5rem; }
   .stats li { text-align: left; }
   .bio { grid-column: 2; grid-row: 3; }

@@ -228,8 +228,39 @@
     });
   }
 
-  function atualizarMais() {
-    $('mais-wrap').hidden = !(posts.length < total);
+  /* ---------- scroll infinito ----------
+     Sem botão: uma sentinela no fim da grade dispara o carregamento da próxima página quando chega
+     a ~900px da tela. Depois de cada página a sentinela é reavaliada (se a tela ainda tem espaço, já pede a próxima). */
+  var io = null;
+  var falhouAoPaginar = false;
+
+  function carregarMais() {
+    if (carregando || falhouAoPaginar || posts.length >= total) return;
+    carregar();
+  }
+
+  function verificarScrollManual() {
+    var s = $('sentinela');
+    if (s && s.getBoundingClientRect().top < window.innerHeight + 900) carregarMais();
+  }
+
+  function reavaliarScroll() {
+    var s = $('sentinela');
+    if (!s || falhouAoPaginar || posts.length >= total) return;
+    if (io) { io.unobserve(s); io.observe(s); } else verificarScrollManual();
+  }
+
+  function iniciarScrollInfinito() {
+    var s = $('sentinela');
+    if (!s) return;
+    if ('IntersectionObserver' in window) {
+      io = new IntersectionObserver(function (es) {
+        for (var i = 0; i < es.length; i++) if (es[i].isIntersecting) { carregarMais(); break; }
+      }, { rootMargin: '0px 0px 900px 0px' });
+      io.observe(s);
+    } else {
+      window.addEventListener('scroll', verificarScrollManual, { passive: true });
+    }
   }
 
   /* Seguidores: vem do banco (atualizado todo dia), nunca direto do Instagram. Sem número, o contador fica escondido. */
@@ -247,24 +278,24 @@
     if (carregando) return Promise.resolve();
     carregando = true;
     var primeira = posts.length === 0;
-    var btn = $('mais');
-    btn.disabled = true;
-    if (primeira) { estado('Carregando posts...', ''); esqueleto(true); }
+    if (primeira) estado('Carregando posts...', '');
+    esqueleto(true); // esqueletos no fim da grade enquanto a próxima página chega
     return buscar(posts.length).then(function (j) {
       total = Number(j.total) || 0;
       esqueleto(false);
       estado('');
+      falhouAoPaginar = false;
       adicionar(j.posts);
       $('st-posts').textContent = String(total);
       if (!posts.length) estado('Nada por aqui ainda', 'Os posts aparecem aqui assim que forem publicados no Instagram.');
-      atualizarMais();
     }).catch(function (err) {
       esqueleto(false);
+      falhouAoPaginar = true; // para de pedir sozinho; só o botão "Tentar de novo" tenta outra vez
       var msg = 'Não deu para carregar agora (' + (err && err.message ? err.message : 'erro desconhecido') + '). Confira sua conexão ou veja os posts direto no Instagram.';
-      estado('Falha ao carregar os posts', msg, { txt: 'Tentar de novo', fn: function () { estado(''); carregar(); } });
+      estado('Falha ao carregar os posts', msg, { txt: 'Tentar de novo', fn: function () { estado(''); falhouAoPaginar = false; carregar(); } });
     }).then(function () {
       carregando = false;
-      btn.disabled = false;
+      reavaliarScroll();
     });
   }
 
@@ -724,7 +755,7 @@
       i = k === 'Home' ? 0 : k === 'End' ? ABAS.length - 1 : (i + (k === 'ArrowRight' ? 1 : -1) + ABAS.length) % ABAS.length;
       aba(ABAS[i], true);
     });
-    $('mais').addEventListener('click', carregar);
+    iniciarScrollInfinito();
     $('v-share').addEventListener('click', function () { compartilharPost(); });
     $('v-expand').addEventListener('click', abrirZoom);
     $('p-share').addEventListener('click', compartilharPerfil);
