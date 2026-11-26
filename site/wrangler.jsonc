@@ -1,0 +1,13 @@
+{
+  "name": "polo9n",
+  "compatibility_date": "2026-11-25",
+  "assets": {
+    "directory": "./public",
+    "html_handling": "auto-trailing-slash",
+    "not_found_handling": "404-page"
+  },
+  "routes": [
+    { "pattern": "polo9n.com.br", "custom_domain": true },
+    { "pattern": "www.polo9n.com.br", "custom_domain": true }
+  ]
+}
