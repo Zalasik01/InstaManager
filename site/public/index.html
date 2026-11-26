@@ -128,6 +128,7 @@
     <div class="tabs" role="tablist" aria-label="Seções do perfil">
       <button type="button" role="tab" id="tab-posts" aria-selected="true" aria-controls="painel-posts">Posts</button>
       <button type="button" role="tab" id="tab-carro" aria-selected="false" aria-controls="painel-carro" tabindex="-1">O carro</button>
+      <button type="button" role="tab" id="tab-links" aria-selected="false" aria-controls="painel-links" tabindex="-1">Links</button>
     </div>
 
     <section class="panel" id="painel-posts" role="tabpanel" aria-labelledby="tab-posts">
@@ -140,40 +141,73 @@
     <section class="panel" id="painel-carro" role="tabpanel" aria-labelledby="tab-carro" hidden>
       <div class="car" id="carro"></div>
     </section>
+
+    <section class="panel" id="painel-links" role="tabpanel" aria-labelledby="tab-links" hidden>
+      <div class="car" id="links"></div>
+    </section>
   </main>
 
   <dialog class="viewer" id="viewer" aria-label="Visualizador de post">
-    <div class="v-head">
-      <b id="v-count"></b>
-      <button type="button" class="icon-btn" id="v-close" aria-label="Fechar">
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M5 5l14 14M19 5L5 19"/></svg>
-      </button>
-    </div>
-    <div class="v-body">
+    <button type="button" class="icon-btn v-x" id="v-close" aria-label="Fechar">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M5 5l14 14M19 5L5 19"/></svg>
+    </button>
+    <button type="button" class="icon-btn v-post v-pl" id="v-pprev" aria-label="Post anterior">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M15 5l-7 7 7 7"/></svg>
+    </button>
+    <button type="button" class="icon-btn v-post v-pr" id="v-pnext" aria-label="Próximo post">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 5l7 7-7 7"/></svg>
+    </button>
+    <div class="v-box" id="v-box">
       <div class="v-media">
         <img id="v-img" alt="" width="1080" height="1080">
         <button type="button" class="icon-btn v-arrow v-prev" id="v-iprev" aria-label="Imagem anterior">
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M15 5l-7 7 7 7"/></svg>
-        </button>
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M15 5l-7 7 7 7"/></svg>
+    </button>
         <button type="button" class="icon-btn v-arrow v-next" id="v-inext" aria-label="Próxima imagem">
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 5l7 7-7 7"/></svg>
-        </button>
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 5l7 7-7 7"/></svg>
+    </button>
         <div class="dots" id="v-dots" aria-hidden="true"></div>
       </div>
       <div class="v-info">
-        <p class="v-cap" id="v-cap"></p>
-        <ul class="chips" id="v-chips" aria-label="Hashtags"></ul>
-        <p class="v-date"><time id="v-date"></time></p>
+        <div class="v-top"><img class="v-av" src="/img/icon-192.png" alt="" width="32" height="32"><b>@polo_9n4_12</b></div>
+        <div class="v-scroll">
+          <p class="v-nums" id="v-nums"></p>
+          <p class="v-cap" id="v-cap"></p>
+          <ul class="chips" id="v-chips" aria-label="Hashtags"></ul>
+          <p class="v-date"><time id="v-date"></time></p>
+        </div>
         <div class="v-actions">
-          <a id="v-link" href="#" rel="noopener noreferrer" target="_blank">Ver no Instagram</a>
           <button type="button" class="share" id="v-share">Compartilhar</button>
+          <button type="button" class="share" id="v-expand">Expandir imagem</button>
+          <a id="v-link" href="#" rel="noopener noreferrer" target="_blank">Ver no Instagram</a>
         </div>
-        <div class="v-nav">
-          <button type="button" id="v-pprev">Post anterior</button>
-          <button type="button" id="v-pnext">Próximo post</button>
-        </div>
+        <p class="v-count" id="v-count"></p>
       </div>
     </div>
+  </dialog>
+
+  <dialog class="zoom" id="zoom" aria-label="Imagem em tamanho real">
+    <div class="z-bar">
+      <div class="z-tools">
+        <button type="button" class="z-btn" id="z-out" aria-label="Diminuir zoom">&minus;</button>
+        <output class="z-pct" id="z-pct" aria-live="off">100%</output>
+        <button type="button" class="z-btn" id="z-in" aria-label="Aumentar zoom">+</button>
+        <button type="button" class="z-btn z-txt" id="z-fit" aria-label="Ajustar à tela ou 100%">Ajustar</button>
+      </div>
+      <div class="z-tools">
+        <button type="button" class="z-btn z-txt" id="z-dl">Baixar imagem</button>
+        <a class="z-btn z-txt" id="z-open" href="#" target="_blank" rel="noopener noreferrer">Abrir em nova aba</a>
+        <button type="button" class="icon-btn" id="z-close" aria-label="Fechar imagem expandida">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M5 5l14 14M19 5L5 19"/></svg>
+        </button>
+      </div>
+    </div>
+    <div class="z-stage" id="z-stage" tabindex="0" aria-label="Imagem ampliada. Mais e menos mudam o zoom, setas movem.">
+      <img id="z-img" alt="">
+    </div>
+    <button type="button" class="icon-btn z-arrow v-prev" id="z-prev" aria-label="Imagem anterior"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M15 5l-7 7 7 7"/></svg></button>
+    <button type="button" class="icon-btn z-arrow v-next" id="z-next" aria-label="Próxima imagem"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 5l7 7-7 7"/></svg></button>
+    <p class="z-res" id="z-res"></p>
   </dialog>
 
   <footer>
@@ -188,7 +222,7 @@
     <p>Nova versão disponível.</p>
     <button type="button" id="aviso-update-ok">Atualizar</button>
   </div>
-  <div class="toast" id="toast" role="status" aria-live="polite" hidden></div>
+  <div class="toast" id="toast" popover="manual" role="status" aria-live="polite" hidden></div>
   <script src="/app.js" defer></script>
 </body>
 </html>

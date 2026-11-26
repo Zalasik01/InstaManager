@@ -60,6 +60,33 @@
     return t.length > 90 ? t.slice(0, 87) + '...' : t;
   }
 
+  var NF;
+  try { NF = new Intl.NumberFormat('pt-BR', { notation: 'compact', maximumFractionDigits: 1 }); } catch (e) { NF = null; }
+  function num(n) { return typeof n === 'number' && isFinite(n) && n >= 0 ? n : null; }
+  function fmt(n) { return NF ? NF.format(n) : n.toLocaleString('pt-BR'); }
+  function plural(n, um, varios) { return fmt(n) + ' ' + (n === 1 ? um : varios); }
+  function numeros(p) {
+    var out = [], v = num(p.visualizacoes), c = num(p.curtidas), m = num(p.comentarios);
+    if (v != null) out.push(plural(v, 'visualização', 'visualizações'));
+    if (c != null) out.push(plural(c, 'curtida', 'curtidas'));
+    if (m != null) out.push(plural(m, 'comentário', 'comentários'));
+    return out;
+  }
+  function icone(inner, cls) {
+    var s = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+    s.setAttribute('viewBox', '0 0 24 24');
+    s.setAttribute('class', cls);
+    s.setAttribute('aria-hidden', 'true');
+    s.setAttribute('fill', 'none');
+    s.setAttribute('stroke', 'currentColor');
+    s.setAttribute('stroke-width', '2');
+    s.setAttribute('stroke-linecap', 'round');
+    s.setAttribute('stroke-linejoin', 'round');
+    s.innerHTML = inner; // texto constante, nunca dados externos
+    return s;
+  }
+  var OLHO = '<path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7S2 12 2 12z"/><circle cx="12" cy="12" r="3"/>';
+
   /* ---------- demo (sem rede) ---------- */
   function svgDados(i, n) {
     var tons = ['#d9d6cf', '#8f949a', '#3b4148', '#b6b0a2', '#6b7078', '#e8e6e0'];
@@ -82,6 +109,9 @@
         legenda: 'Post de exemplo número ' + (i + 1) + '. Só para testar o layout.\n\n#polo #9n4 #vwpolo #carro_branco',
         publicado_em: new Date(Date.UTC(2026, 10, 25 - i, 21, 57)).toISOString(),
         permalink: 'https://www.instagram.com/polo_9n4_12/',
+        visualizacoes: i % 5 === 3 ? null : i === 0 ? 15230 : 1200 + i * 873,
+        curtidas: i % 6 === 2 ? null : i * 37 + 5,
+        comentarios: i % 3 === 0 ? null : i * 2 + 1,
         imagens: imgs
       });
     }
@@ -89,12 +119,6 @@
   }
 
   /* ---------- API ---------- */
-  function buscar0(limite) {
-    if (DEMO) return demoPosts(0, limite);
-    return fetch('/api/posts?limite=' + limite, { headers: { Accept: 'application/json' } })
-      .then(function (r) { if (!r.ok) throw new Error(); return r.json(); });
-  }
-
   function buscar(offset) {
     if (DEMO) return demoPosts(offset, LIMITE);
     return fetch('/api/posts?limite=' + LIMITE + '&offset=' + offset, { headers: { Accept: 'application/json' } })
@@ -141,7 +165,9 @@
       var b = el('button', 'tile');
       b.type = 'button';
       var imgs = Array.isArray(p.imagens) ? p.imagens : [];
-      b.setAttribute('aria-label', 'Abrir post: ' + (resumo(p) || 'sem legenda') + (imgs.length > 1 ? ' (' + imgs.length + ' imagens)' : ''));
+      var nums = numeros(p);
+      var vis = num(p.visualizacoes);
+      b.setAttribute('aria-label', 'Abrir post: ' + (resumo(p) || 'sem legenda') + (imgs.length > 1 ? ' (' + imgs.length + ' imagens)' : '') + (vis != null ? ', ' + nums[0] : ''));
       if (imgs[0]) {
         var im = el('img');
         im.src = imgs[0];
@@ -152,8 +178,31 @@
         b.appendChild(im);
       }
       if (imgs.length > 1) b.appendChild(svgIcone());
+      if (vis != null) {
+        b.classList.add('has-views');
+        var sv = el('span', 'views');
+        sv.appendChild(icone(OLHO, 'ic'));
+        sv.appendChild(document.createTextNode(fmt(vis)));
+        b.appendChild(sv);
+      }
       b.addEventListener('click', function () { abrir(idx, b); });
       li.appendChild(b);
+      var veil = el('div', 'veil');
+      var legenda = separar(p.legenda).texto;
+      if (legenda) { var vc = el('p', 'veil-cap', legenda); vc.setAttribute('aria-hidden', 'true'); veil.appendChild(vc); }
+      if (nums.length) { var vn = el('p', 'veil-nums', nums.join(' · ')); vn.setAttribute('aria-hidden', 'true'); veil.appendChild(vn); }
+      var act = el('div', 'veil-act');
+      var bx = el('button', null, 'Expandir');
+      bx.type = 'button';
+      bx.setAttribute('aria-label', 'Expandir imagem do post');
+      bx.addEventListener('click', function (e) { e.stopPropagation(); atual = idx; imgIdx = 0; abrirZoom(); });
+      var bs = el('button', null, 'Compartilhar');
+      bs.type = 'button';
+      bs.setAttribute('aria-label', 'Compartilhar este post');
+      bs.addEventListener('click', function (e) { e.stopPropagation(); compartilharPost(idx); });
+      act.appendChild(bx); act.appendChild(bs);
+      veil.appendChild(act);
+      li.appendChild(veil);
       g.appendChild(li);
     });
   }
@@ -202,7 +251,11 @@
     var dots = $('v-dots');
     dots.textContent = '';
     if (multi) imgs.forEach(function (_, i) { dots.appendChild(el('i', i === imgIdx ? 'on' : '')); });
+    $('v-box').classList.toggle('compact', !s.texto && !s.tags.length);
     $('v-count').textContent = 'Post ' + (atual + 1) + ' de ' + (total || posts.length);
+    var nn = numeros(p);
+    $('v-nums').textContent = nn.join(' · ');
+    $('v-nums').hidden = !nn.length;
     $('v-cap').textContent = s.texto;
     $('v-cap').hidden = !s.texto;
     var chips = $('v-chips');
@@ -217,8 +270,6 @@
     var ok = typeof p.permalink === 'string' && /^https:\/\/(www\.)?instagram\.com\//.test(p.permalink);
     link.hidden = !ok;
     if (ok) link.href = p.permalink;
-    var sh = $('v-share');
-    sh.hidden = !podeCompartilhar();
     $('v-pprev').disabled = atual <= 0;
     $('v-pnext').disabled = atual >= posts.length - 1 && posts.length >= total;
   }
@@ -254,6 +305,7 @@
 
   function fecharViewer() {
     document.body.classList.remove('lock');
+    if (/^#post=/.test(location.hash)) { try { history.replaceState(null, '', location.pathname + location.search); } catch (e) { /* sem history */ } }
     if (ultimoFoco && document.contains(ultimoFoco)) ultimoFoco.focus();
   }
 
@@ -263,11 +315,14 @@
     var t = $('toast');
     t.textContent = msg;
     t.hidden = false;
+    // popover coloca o aviso na camada de cima, acima dos diálogos abertos
+    if (t.showPopover) { try { if (t.matches(':popover-open')) t.hidePopover(); t.showPopover(); } catch (e) { /* segue */ } }
     clearTimeout(toastTimer);
-    toastTimer = setTimeout(function () { t.hidden = true; }, 2500);
+    toastTimer = setTimeout(function () {
+      if (t.hidePopover) { try { t.hidePopover(); } catch (e) { /* segue */ } }
+      t.hidden = true;
+    }, 2800);
   }
-
-  function podeCompartilhar() { return true; }
 
   function copiar(texto) {
     if (navigator.clipboard && navigator.clipboard.writeText) {
@@ -287,26 +342,83 @@
     return Promise.resolve();
   }
 
-  function compartilhar(dados) {
-    if (navigator.share) {
+  function extensao(tipo) { return tipo === 'image/png' ? 'png' : tipo === 'image/webp' ? 'webp' : 'jpg'; }
+
+  function compartilhar(dados, arquivoUrl) {
+    if (!navigator.share) return copiar(dados.url);
+    var apenasLink = function () {
       return navigator.share(dados).catch(function (e) {
         if (e && e.name === 'AbortError') return;
         return copiar(dados.url);
       });
-    }
-    return copiar(dados.url);
+    };
+    var comArquivo = false;
+    try { comArquivo = !!(arquivoUrl && navigator.canShare && window.File && navigator.canShare({ files: [new File([''], 'a.jpg', { type: 'image/jpeg' })] })); } catch (e) { /* sem suporte */ }
+    if (!comArquivo) return apenasLink();
+    return fetch(arquivoUrl, { mode: 'cors', credentials: 'omit' }).then(function (r) {
+      if (!r.ok) throw new Error();
+      return r.blob();
+    }).then(function (b) {
+      var f = new File([b], 'polo9n.' + extensao(b.type), { type: b.type || 'image/jpeg' });
+      if (!navigator.canShare({ files: [f] })) throw new Error();
+      return navigator.share({ title: dados.title, text: dados.text + ' ' + dados.url, files: [f] });
+    }).catch(function (e) {
+      if (e && e.name === 'AbortError') return;
+      return apenasLink();
+    });
   }
 
-  function compartilharPost() {
-    var p = posts[atual];
+  function compartilharPost(i) {
+    var p = posts[i == null ? atual : i];
     if (!p) return;
-    var ok = typeof p.permalink === 'string' && /^https:\/\/(www\.)?instagram\.com\//.test(p.permalink);
     var s = separar(p.legenda);
-    compartilhar({ title: 'Polo 9n4', text: s.texto ? resumo(p) : 'Foto do Polo 9n4 (@polo_9n4_12)', url: ok ? p.permalink : location.origin + '/' });
+    compartilhar({
+      title: 'Polo 9n4',
+      text: s.texto ? resumo(p) : 'Foto do Polo 9n4 (@polo_9n4_12)',
+      url: location.origin + '/#post=' + encodeURIComponent(p.id)
+    }, Array.isArray(p.imagens) ? p.imagens[i == null ? imgIdx : 0] : '');
   }
 
   function compartilharPerfil() {
     compartilhar({ title: 'Polo 9n4 (@polo_9n4_12)', text: 'VW Polo 2012 branco, geração 9n4. Fotos e ficha do carro.', url: location.origin + '/' });
+  }
+
+  /* ---------- modulo sob demanda (zoom e links) ---------- */
+  var extra = null;
+  function usarExtra(fn) {
+    if (extra) { fn(extra); return; }
+    var s = el('script');
+    s.src = '/extra.js';
+    s.onload = function () {
+      extra = window.PoloExtra({
+        $: $, el: el, toast: toast, cheio: cheio, dataCurta: dataCurta, DEMO: DEMO, ext: extensao,
+        post: function () { return posts[atual]; }, idx: function () { return imgIdx; }, imagem: imagem
+      });
+      fn(extra);
+    };
+    s.onerror = function () { toast('Não deu para carregar agora. Confira a conexão.'); };
+    document.head.appendChild(s);
+    var l = el('link');
+    l.rel = 'stylesheet';
+    l.href = '/extra.css';
+    document.head.appendChild(l);
+  }
+  function abrirZoom() { usarExtra(function (x) { x.abrirZoom(); }); }
+  function carregarLinks() { usarExtra(function (x) { x.carregarLinks(); }); }
+
+  /* ---------- link direto #post=<id> ---------- */
+  function idDoHash() {
+    var m = /^#post=(.+)$/.exec(location.hash);
+    if (!m) return null;
+    try { return decodeURIComponent(m[1]); } catch (e) { return m[1]; }
+  }
+
+  function abrirPorId(id, tentativas) {
+    for (var i = 0; i < posts.length; i++) {
+      if (String(posts[i].id) === id) { abrir(i, null); return; }
+    }
+    if (posts.length >= total || tentativas >= 5) { toast('Post não encontrado'); return; }
+    carregar().then(function () { abrirPorId(id, tentativas + 1); });
   }
 
   /* ---------- PWA: service worker e instalação ---------- */
@@ -429,18 +541,7 @@
     return { txt: d.toLocaleDateString('pt-BR', { day: 'numeric', month: 'long', year: 'numeric' }), iso: m[0] };
   }
 
-  function montarHero(raiz, f, fotoUrl) {
-    var fig = el('figure', 'car-hero');
-    var im = el('img');
-    var fallback = '/img/perfil.png';
-    im.width = 1600; im.height = 1000;
-    im.alt = 'Foto do ' + (cheio(f.modelo) ? f.modelo : 'carro');
-    im.decoding = 'async';
-    im.addEventListener('error', function () { if (im.getAttribute('src') !== fallback) im.src = fallback; });
-    im.src = fotoUrl || fallback;
-    fig.appendChild(im);
-    raiz.appendChild(fig);
-
+  function montarCabecalho(raiz, f) {
     var partes = cheio(f.modelo) ? String(f.modelo).trim().split(/\s+/) : [];
     var marca = partes.length > 1 ? partes.shift() : '';
     var nome = partes.join(' ');
@@ -452,13 +553,13 @@
     raiz.appendChild(cab);
   }
 
-  function montarCarro(c, fotoUrl) {
+  function montarCarro(c) {
     var raiz = $('carro');
     raiz.textContent = '';
     var f = c.ficha || {};
     var usadas = { modelo: 1, geracao: 1 };
 
-    montarHero(raiz, f, fotoUrl);
+    montarCabecalho(raiz, f);
 
     var ver = cheio(f.versao) && cheio(f.geracao) && String(f.versao).trim().toLowerCase() === String(f.geracao).trim().toLowerCase();
     if (ver) usadas.versao = 1;
@@ -503,19 +604,10 @@
     st('st-fotos', c.fotos);
   }
 
-  function fotoDoCarro() {
-    return buscar0(1).then(function (j) {
-      var p = j && j.posts && j.posts[0];
-      var u = p && Array.isArray(p.imagens) ? p.imagens[0] : '';
-      return typeof u === 'string' && u ? u : '';
-    }).catch(function () { return ''; });
-  }
-
   function carregarCarro() {
-    var ficha = fetch('/carro.json', { headers: { Accept: 'application/json' } })
-      .then(function (r) { if (!r.ok) throw new Error(); return r.json(); });
-    var foto = fotoDoCarro();
-    ficha.then(function (c) { return foto.then(function (u) { montarCarro(c, u); }); })
+    fetch('/carro.json', { headers: { Accept: 'application/json' } })
+      .then(function (r) { if (!r.ok) throw new Error(); return r.json(); })
+      .then(montarCarro)
       .catch(function () {
         var raiz = $('carro');
         raiz.textContent = '';
@@ -524,36 +616,41 @@
   }
 
   /* ---------- abas ---------- */
+  var ABAS = ['posts', 'carro', 'links'];
   function aba(qual, foco) {
-    var carro = qual === 'carro';
-    $('tab-posts').setAttribute('aria-selected', String(!carro));
-    $('tab-carro').setAttribute('aria-selected', String(carro));
-    $('tab-posts').tabIndex = carro ? -1 : 0;
-    $('tab-carro').tabIndex = carro ? 0 : -1;
-    $('painel-posts').hidden = carro;
-    $('painel-carro').hidden = !carro;
-    if (foco) (carro ? $('tab-carro') : $('tab-posts')).focus();
-    try { history.replaceState(null, '', carro ? '#carro' : location.pathname + location.search); } catch (e) { /* sem history */ }
+    ABAS.forEach(function (n) {
+      var sel = n === qual;
+      $('tab-' + n).setAttribute('aria-selected', String(sel));
+      $('tab-' + n).tabIndex = sel ? 0 : -1;
+      $('painel-' + n).hidden = !sel;
+    });
+    if (qual === 'links') carregarLinks();
+    if (foco) $('tab-' + qual).focus();
+    try { history.replaceState(null, '', qual === 'posts' ? location.pathname + location.search : '#' + qual); } catch (e) { /* sem history */ }
   }
 
   /* ---------- init ---------- */
   function init() {
-    $('tab-posts').addEventListener('click', function () { aba('posts'); });
-    $('tab-carro').addEventListener('click', function () { aba('carro'); });
+    ABAS.forEach(function (n) { $('tab-' + n).addEventListener('click', function () { aba(n); }); });
     document.querySelector('.tabs').addEventListener('keydown', function (e) {
-      if (e.key === 'ArrowRight' || e.key === 'ArrowLeft' || e.key === 'Home' || e.key === 'End') {
-        e.preventDefault();
-        var vaiCarro = e.key === 'End' ? true : e.key === 'Home' ? false : $('tab-posts').getAttribute('aria-selected') === 'true';
-        aba(vaiCarro ? 'carro' : 'posts', true);
-      }
+      var k = e.key;
+      if (k !== 'ArrowRight' && k !== 'ArrowLeft' && k !== 'Home' && k !== 'End') return;
+      e.preventDefault();
+      var i = 0;
+      ABAS.forEach(function (n, x) { if ($('tab-' + n).getAttribute('aria-selected') === 'true') i = x; });
+      i = k === 'Home' ? 0 : k === 'End' ? ABAS.length - 1 : (i + (k === 'ArrowRight' ? 1 : -1) + ABAS.length) % ABAS.length;
+      aba(ABAS[i], true);
     });
     $('mais').addEventListener('click', carregar);
-    $('v-share').addEventListener('click', compartilharPost);
+    $('v-share').addEventListener('click', function () { compartilharPost(); });
+    $('v-expand').addEventListener('click', abrirZoom);
     $('p-share').addEventListener('click', compartilharPerfil);
 
     var dlg = $('viewer');
     $('v-close').addEventListener('click', function () { dlg.close(); });
     dlg.addEventListener('close', fecharViewer);
+    dlg.addEventListener('click', function (e) { if (e.target === dlg) dlg.close(); });
+    window.addEventListener('hashchange', function () { var id = idDoHash(); if (id) abrirPorId(id, 0); });
     $('v-iprev').addEventListener('click', function () { imagem(-1); });
     $('v-inext').addEventListener('click', function () { imagem(1); });
     $('v-pprev').addEventListener('click', function () { post(-1); });
@@ -576,10 +673,11 @@
 
     carregarCarro();
     if (location.hash === '#carro') aba('carro');
+    else if (location.hash === '#links') aba('links');
     else if (location.hash === '#posts') { aba('posts'); $('tab-posts').scrollIntoView(); }
     registrarSW();
     iniciarInstalacao();
-    carregar();
+    carregar().then(function () { var id = idDoHash(); if (id) abrirPorId(id, 1); });
   }
 
   init();

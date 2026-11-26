@@ -1,7 +1,7 @@
 'use strict';
 
 // Mude VERSAO a cada publicação que altere o shell para renovar os caches.
-const VERSAO = 'v2';
+const VERSAO = 'v3';
 const CACHE_SHELL = 'polo9n-shell-' + VERSAO;
 const CACHE_API = 'polo9n-api-' + VERSAO;
 const CACHE_IMG = 'polo9n-img-' + VERSAO;
@@ -17,7 +17,10 @@ const SHELL = [
   '/offline.js',
   '/style.css',
   '/app.js',
+  '/extra.js',
+  '/extra.css',
   '/carro.json',
+  '/links.json',
   '/manifest.webmanifest',
   '/favicon.svg',
   '/img/favicon-32.png',
