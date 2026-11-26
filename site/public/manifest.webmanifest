@@ -1,0 +1,25 @@
+{
+  "name": "Polo 9n4",
+  "short_name": "Polo 9n4",
+  "description": "Perfil de um VW Polo 2012 branco, geração 9n4: fotos do Instagram @polo_9n4_12 e ficha do carro.",
+  "lang": "pt-BR",
+  "dir": "ltr",
+  "id": "/",
+  "start_url": "/?utm_source=pwa",
+  "scope": "/",
+  "display": "standalone",
+  "display_override": ["standalone", "minimal-ui"],
+  "orientation": "portrait",
+  "background_color": "#0c0c0d",
+  "theme_color": "#0c0c0d",
+  "categories": ["lifestyle", "social", "automotive"],
+  "icons": [
+    { "src": "/img/icon-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any" },
+    { "src": "/img/icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any" },
+    { "src": "/img/icon-maskable-512.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable" }
+  ],
+  "shortcuts": [
+    { "name": "Posts", "short_name": "Posts", "url": "/#posts", "icons": [{ "src": "/img/icon-192.png", "sizes": "192x192", "type": "image/png" }] },
+    { "name": "O carro", "short_name": "O carro", "url": "/#carro", "icons": [{ "src": "/img/icon-192.png", "sizes": "192x192", "type": "image/png" }] }
+  ]
+}
