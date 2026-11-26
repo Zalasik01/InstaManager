@@ -13,6 +13,14 @@
   var imgIdx = 0;
   var ultimoFoco = null;
 
+  /* Como o usuário navega: teclado ou ponteiro. Só quem usa teclado precisa que o foco volte ao card
+     depois de fechar o visualizador; com mouse/toque o card não deve ficar "selecionado". */
+  var viaTeclado = false;
+  document.addEventListener('keydown', function (e) {
+    if (e.key === 'Tab' || e.key === 'Enter' || e.key === ' ' || e.key.indexOf('Arrow') === 0) viaTeclado = true;
+  }, true);
+  document.addEventListener('pointerdown', function () { viaTeclado = false; }, true);
+
   /* ---------- utilidades ---------- */
   function el(tag, cls, text) {
     var n = document.createElement(tag);
@@ -161,7 +169,7 @@
     lista.forEach(function (p) {
       var idx = posts.length;
       posts.push(p);
-      var li = el('li');
+      var li = el('li', 'card');
       var b = el('button', 'tile');
       b.type = 'button';
       var imgs = Array.isArray(p.imagens) ? p.imagens : [];
@@ -170,6 +178,10 @@
       b.setAttribute('aria-label', 'Abrir post: ' + (resumo(p) || 'sem legenda') + (imgs.length > 1 ? ' (' + imgs.length + ' imagens)' : '') + (vis != null ? ', ' + nums[0] : ''));
       if (imgs[0]) {
         var im = el('img');
+        // Esqueleto brilhando no card até a imagem chegar; depois ela aparece com fade.
+        b.classList.add('carregando');
+        im.addEventListener('load', function () { b.classList.remove('carregando'); b.classList.add('pronto'); });
+        im.addEventListener('error', function () { b.classList.remove('carregando'); b.classList.add('falhou'); });
         im.src = imgs[0];
         im.alt = '';
         im.width = 400; im.height = 400;
@@ -306,7 +318,17 @@
   function fecharViewer() {
     document.body.classList.remove('lock');
     if (/^#post=/.test(location.hash)) { try { history.replaceState(null, '', location.pathname + location.search); } catch (e) { /* sem history */ } }
-    if (ultimoFoco && document.contains(ultimoFoco)) ultimoFoco.focus();
+    if (viaTeclado) {
+      if (ultimoFoco && document.contains(ultimoFoco)) ultimoFoco.focus();
+    } else {
+      // O navegador devolve o foco ao card que abriu o <dialog> (e acende véu e contorno): tira esse foco.
+      var soltar = function () {
+        var a = document.activeElement;
+        if (a && a !== document.body && typeof a.blur === 'function') a.blur();
+      };
+      soltar();
+      setTimeout(soltar, 0);
+    }
   }
 
   /* ---------- compartilhar ---------- */

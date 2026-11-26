@@ -107,6 +107,26 @@ main { flex: 1; width: 100%; }
 .skel li { animation: pulse 1.4s ease-in-out infinite; }
 @keyframes pulse { 50% { opacity: .5; } }
 
+/* ---------- efeitos nos cards e esqueleto ---------- */
+@keyframes card-in { from { opacity: 0; transform: translateY(.6rem) scale(.98); } }
+@keyframes shimmer { to { background-position: -200% 0; } }
+.grid li.card { animation: card-in .5s cubic-bezier(.2, .7, .2, 1) both; }
+.grid li.card:nth-child(3n+2) { animation-delay: .05s; }
+.grid li.card:nth-child(3n) { animation-delay: .1s; }
+.tile { overflow: hidden; background: var(--surface); }
+.tile img { opacity: 0; transition: opacity .45s ease, transform .6s cubic-bezier(.2, .7, .2, 1); }
+.tile.pronto img { opacity: 1; }
+.tile.carregando, .grid li.skel-i {
+  background: linear-gradient(100deg, var(--surface) 30%, #242428 50%, var(--surface) 70%) 0 0 / 200% 100%;
+  animation: shimmer 1.4s linear infinite;
+}
+.skel-i { aspect-ratio: 1; }
+.tile.falhou { background: var(--surface); }
+.tile:active img { transform: scale(.98); }
+@media (hover: hover) and (pointer: fine) {
+  .tile.pronto:hover img { opacity: 1; transform: scale(1.06); }
+}
+
 /* ficha */
 .car { padding-top: 1.25rem; max-width: 46rem; margin: 0 auto; }
 .car > * { animation: car-in .5s ease both; }

@@ -1,4 +1,4 @@
-﻿{
+{
   // Configuração provisória: publica só no endereço gratuito polo9n.<conta>.workers.dev.
   // Quando o domínio polo9n.com.br estiver ativo no Cloudflare, use wrangler.dominio.jsonc
   // (npx wrangler deploy -c wrangler.dominio.jsonc) para ligar o domínio.
@@ -11,8 +11,8 @@
     "binding": "ASSETS",
     "html_handling": "auto-trailing-slash",
     "not_found_handling": "404-page",
-    // Só /api/* passa pelo código do Worker; o resto sai direto dos arquivos estáticos.
-    "run_worker_first": ["/api/*"]
+    // Toda requisição passa pelo Worker (redireciona www e marca o endereço workers.dev como noindex); os arquivos estáticos continuam saindo de ASSETS.
+    "run_worker_first": true
   },
   "vars": {
     "SUPABASE_URL": "https://crzmyemggpgjcrwwuwka.supabase.co",
