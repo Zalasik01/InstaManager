@@ -177,14 +177,23 @@
       var vis = num(p.visualizacoes);
       b.setAttribute('aria-label', 'Abrir post: ' + (resumo(p) || 'sem legenda') + (imgs.length > 1 ? ' (' + imgs.length + ' imagens)' : '') + (vis != null ? ', ' + nums[0] : ''));
       if (imgs[0]) {
-        var im = el('img');
+        // Camada de fundo: a mesma foto desfocada, para preencher as sobras do tile 4:5.
+        var bg = el('img', 'bg');
+        bg.src = imgs[0];
+        bg.alt = '';
+        bg.setAttribute('aria-hidden', 'true');
+        bg.width = 400; bg.height = 500;
+        bg.loading = 'lazy';
+        bg.decoding = 'async';
+        b.appendChild(bg);
+        var im = el('img', 'fg');
         // Esqueleto brilhando no card até a imagem chegar; depois ela aparece com fade.
         b.classList.add('carregando');
         im.addEventListener('load', function () { b.classList.remove('carregando'); b.classList.add('pronto'); });
         im.addEventListener('error', function () { b.classList.remove('carregando'); b.classList.add('falhou'); });
         im.src = imgs[0];
         im.alt = '';
-        im.width = 400; im.height = 400;
+        im.width = 400; im.height = 500;
         im.loading = 'lazy';
         im.decoding = 'async';
         b.appendChild(im);

@@ -72,9 +72,11 @@ main { flex: 1; width: 100%; }
 
 /* grade */
 .grid { list-style: none; margin: 0 -1rem; padding: 0; display: grid; grid-template-columns: repeat(3, 1fr); gap: 2px; }
-.grid li { position: relative; aspect-ratio: 1; background: var(--surface); }
+.grid li { position: relative; aspect-ratio: 4 / 5; background: var(--surface); }
 .tile { display: block; width: 100%; height: 100%; padding: 0; border: 0; background: none; cursor: pointer; position: relative; }
-.tile img { width: 100%; height: 100%; aspect-ratio: 1; object-fit: cover; display: block; }
+.tile img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: contain; display: block; }
+/* Foto inteira (sem corte) sobre ela mesma desfocada, para preencher o que sobra do 4:5. */
+.tile img.bg { object-fit: cover; filter: blur(18px) saturate(1.1); transform: scale(1.2); }
 .tile { touch-action: manipulation; -webkit-touch-callout: none; }
 .grid li:nth-child(n+13) { content-visibility: auto; contain-intrinsic-size: auto 33vw; }
 .skel-i { animation: pulse 1.4s ease-in-out infinite; }
@@ -116,15 +118,17 @@ main { flex: 1; width: 100%; }
 .tile { overflow: hidden; background: var(--surface); }
 .tile img { opacity: 0; transition: opacity .45s ease, transform .6s cubic-bezier(.2, .7, .2, 1); }
 .tile.pronto img { opacity: 1; }
+.tile img.bg { opacity: 0; }
+.tile.pronto img.bg { opacity: .55; }
 .tile.carregando, .grid li.skel-i {
   background: linear-gradient(100deg, var(--surface) 30%, #242428 50%, var(--surface) 70%) 0 0 / 200% 100%;
   animation: shimmer 1.4s linear infinite;
 }
-.skel-i { aspect-ratio: 1; }
+.skel-i { aspect-ratio: 4 / 5; }
 .tile.falhou { background: var(--surface); }
-.tile:active img { transform: scale(.98); }
+.tile:active img.fg { transform: scale(.98); }
 @media (hover: hover) and (pointer: fine) {
-  .tile.pronto:hover img { opacity: 1; transform: scale(1.06); }
+  .tile.pronto:hover img.fg { transform: scale(1.04); }
 }
 
 /* ficha */
