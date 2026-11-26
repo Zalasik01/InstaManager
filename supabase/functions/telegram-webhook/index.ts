@@ -7,6 +7,8 @@ import { createClient } from "npm:@supabase/supabase-js@2";
 import { encodeBase64 } from "jsr:@std/encoding@1/base64";
 import { publicarNoInstagram } from "../_shared/instagram.ts";
 import { arquivarPostNoDrive } from "../_shared/arquivar.ts";
+import { type Resultado, verificarIntegracoes } from "../_shared/status.ts";
+import { importarPostsDoInstagram } from "../_shared/importar.ts";
 import { formatarHorario, horaPronta, interpretarHorario } from "../_shared/horario.ts";
 
 const TOKEN = Deno.env.get("TELEGRAM_BOT_TOKEN")!;
@@ -107,18 +109,26 @@ async function baixarArquivoTelegram(file_id: string): Promise<Uint8Array> {
 }
 
 async function escolherHashtags(): Promise<string[]> {
-  const { data } = await db.from("hashtags").select("tag,tamanho,nota,ultimo_uso");
+  const { data } = await db.from("hashtags").select("tag,tamanho,nota,ultimo_uso,usos").eq("ativa", true);
   const todas = data ?? [];
+  const tresDias = Date.now() - 3 * 24 * 3600 * 1000;
+  // Pontuação: tag com 2+ usos medidos vale a sua nota (alcance relativo, ~1 = média dos posts);
+  // tag ainda não testada vale 1 (neutra), para ser explorada. Sorteio (0 a 0,5) mantém a variedade
+  // e tag usada nos últimos 3 dias perde pontos, para não repetir sempre o mesmo bloco.
+  const pontos = (h: (typeof todas)[number]) =>
+    (Number(h.usos) >= 2 && Number(h.nota) > 0 ? Number(h.nota) : 1) +
+    Math.random() * 0.5 -
+    (h.ultimo_uso && new Date(h.ultimo_uso).getTime() > tresDias ? 0.6 : 0);
   const sorteio = (lista: typeof todas, n: number) =>
     lista
-      .map((h) => ({ h, r: Math.random() + Number(h.nota) * 0.05 - (h.ultimo_uso ? 0.3 : 0) }))
+      .map((h) => ({ h, r: pontos(h) }))
       .sort((a, b) => b.r - a.r)
       .slice(0, n)
       .map((x) => x.h.tag);
   return [
-    ...sorteio(todas.filter((h) => h.tamanho === "grande"), 3),
-    ...sorteio(todas.filter((h) => h.tamanho === "media"), 6),
-    ...sorteio(todas.filter((h) => h.tamanho === "nicho"), 8),
+    ...sorteio(todas.filter((h) => h.tamanho === "grande"), 2),
+    ...sorteio(todas.filter((h) => h.tamanho === "media"), 4),
+    ...sorteio(todas.filter((h) => h.tamanho === "nicho"), 4),
   ];
 }
 
@@ -140,10 +150,13 @@ async function gerarLegenda(jpeg: Uint8Array, dica: string | null): Promise<stri
     "Escreva a legenda de um post do Instagram.",
     `Contexto da página (siga à risca): ${contexto}`,
     "Regras:",
-    "- Português do Brasil, 1 a 2 linhas curtas.",
+    "- Português do Brasil. UMA única frase curta, com no máximo 8 palavras (até 60 caracteres).",
+    "- Escolha UM só destaque do carro. Não encadeie vários detalhes nem adjetivos.",
+    "- Cite só o que você vê com certeza na foto. Na dúvida, fale apenas da cor e do ângulo.",
+    "- Evite clichês de IA: brilhando, destacando, imponente, estilo, elegância, show.",
     "- A página não tem seguidores: NÃO faça perguntas e NÃO peça comentário, curtida ou marcação.",
-    "- Descreva só o que aparece na foto sobre o carro. Não invente.",
-    "- No máximo 1 emoji.",
+    "- No máximo 1 emoji, ou nenhum.",
+    "- Exemplos só do tamanho e do tom (não copie): \"Polo branco, visão traseira.\" / \"Traseira limpa do meu Polo.\"",
     "- Responda apenas com a legenda, sem hashtags e sem aspas.",
     dica ? `Dica do dono para esta foto (tem prioridade sobre o resto): ${dica}` : "",
   ].filter(Boolean).join("\n");
@@ -196,6 +209,33 @@ async function gerarLegenda(jpeg: Uint8Array, dica: string | null): Promise<stri
       if (!texto) await new Promise((res) => setTimeout(res, 1000));
     }
     if (texto) break;
+  }
+  // Rede de segurança: se a IA passar de 90 caracteres, pede uma versão mais curta (só texto, sem imagem).
+  if (texto.length > 90) {
+    try {
+      const r = await comPrazo(
+        `https://generativelanguage.googleapis.com/v1beta/models/${MODEL}:generateContent`,
+        {
+          method: "POST",
+          headers: { "x-goog-api-key": GEMINI_KEY, "content-type": "application/json" },
+          body: JSON.stringify({
+            contents: [{
+              parts: [{
+                text: `Reescreva em uma única frase de no máximo 8 palavras, mantendo o sentido e sem inventar nada. Responda só com a frase, sem aspas:\n${texto}`,
+              }],
+            }],
+            generationConfig: { maxOutputTokens: 200, thinkingConfig: { thinkingBudget: 0 } },
+          }),
+        },
+        10000,
+      );
+      if (r.ok) {
+        const j = await r.json();
+        const cand = j.candidates?.[0];
+        const curto = (cand?.content?.parts ?? []).map((p: { text?: string }) => p.text ?? "").join("").trim();
+        if (curto && cand?.finishReason === "STOP" && curto.length < texto.length) texto = curto;
+      }
+    } catch { /* mantém a versão original */ }
   }
   trace(texto ? "legenda_ok" : "legenda_falhou", texto ? null : ultimoErro);
   if (!texto) {
@@ -326,6 +366,12 @@ async function tratarBotao(cb: any) {
     ...(acao === "cancelar" ? { text: "Cancelado" } : {}),
   });
 
+  // Ações do /menu e de posts que não são rascunho (agendados, com erro).
+  if (acao === "menu") return tratarMenu(cb, postId);
+  if (acao === "cancelagenda") return cancelarAgendado(cb, postId);
+  if (acao === "retentar") return retentarPost(cb, postId);
+  if (acao === "descartar") return descartarPost(cb, postId);
+
   const { data: post } = await db.from("posts").select("*").eq("id", postId).maybeSingle();
   if (!post) return enviar(chat_id, "Post não encontrado.");
   if (post.status !== "rascunho") return enviar(chat_id, `Este post já está: ${post.status}.`);
@@ -378,6 +424,7 @@ async function tratarBotao(cb: any) {
         atualizado_em: new Date().toISOString(),
       }).eq("id", postId);
       await enviar(chat_id, "Publicado no Instagram.");
+      await db.rpc("registrar_usos_hashtags", { p_post_id: postId }); // conta o uso de cada hashtag
       await arquivarPostNoDrive(db, post);
       return;
     } catch (e) {
@@ -435,7 +482,9 @@ async function confirmarAgendamento(chat_id: number, postId: string, quando: Dat
     atualizado_em: new Date().toISOString(),
   }).eq("id", postId).eq("status", "rascunho").select("id").maybeSingle();
   if (!data) return enviar(chat_id, "Não consegui agendar: o post não está mais como rascunho.");
-  return enviar(chat_id, `Agendado para ${formatarHorario(quando)} (horário de Brasília).`);
+  return enviar(chat_id, `Agendado para ${formatarHorario(quando)} (horário de Brasília).`, {
+    reply_markup: { inline_keyboard: [[{ text: "Cancelar agendamento", callback_data: `cancelagenda:${postId}` }]] },
+  });
 }
 
 /** Texto livre do dono: se há um post esperando horário, interpreta como horário. Devolve false se não há. */
@@ -452,6 +501,232 @@ async function tratarHorarioTexto(chat_id: number, texto: string, msgId?: number
   }
   await confirmarAgendamento(chat_id, post.id, quando);
   return true;
+}
+
+// /hashtags: ranking das tags medidas e quantas ainda não têm dados.
+async function textoHashtags(): Promise<string> {
+  const { data } = await db.from("hashtags").select("tag,tamanho,nota,usos,ativa").order("usos", { ascending: false });
+  const todas = data ?? [];
+  const medidas = todas.filter((h) => Number(h.usos) >= 2 && Number(h.nota) > 0)
+    .sort((a, b) => Number(b.nota) - Number(a.nota));
+  const linha = (h: (typeof todas)[number]) => `${h.tag} · nota ${Number(h.nota).toFixed(2)} · ${h.usos} uso(s)`;
+  const sem = todas.filter((h) => !(Number(h.usos) >= 2 && Number(h.nota) > 0)).length;
+  const partes = [
+    `Hashtags: ${todas.length} no banco, ${medidas.length} já medidas, ${sem} ainda sem dados.`,
+    "A nota é o alcance médio dos posts que usaram a tag, comparado à mediana (1,00 = média). Uma tag só é medida depois de 2 usos com métricas coletadas.",
+  ];
+  if (medidas.length) {
+    partes.push("Melhores:\n" + medidas.slice(0, 5).map(linha).join("\n"));
+    if (medidas.length > 5) partes.push("Piores:\n" + medidas.slice(-3).reverse().map(linha).join("\n"));
+  } else {
+    partes.push("Ainda não há métricas coletadas. Enquanto isso o bot varia as tags, priorizando as não testadas.");
+  }
+  return partes.join("\n\n");
+}
+
+const mostrarHashtags = async (chat_id: number) => { await enviar(chat_id, await textoHashtags()); };
+
+// ---------- /menu: status das integrações, agendados e posts com erro ----------
+
+// Botões fixos no lugar do teclado do chat: tocar neles envia o texto "Criar postagem" ou "Menu".
+const tecladoFixo = {
+  keyboard: [[{ text: "Criar postagem" }, { text: "Menu" }]],
+  resize_keyboard: true,
+  is_persistent: true,
+  input_field_placeholder: "Toque em um botão ou envie a foto",
+};
+
+const tecladoMenu = {
+  inline_keyboard: [
+    [{ text: "Status das integrações", callback_data: "menu:status" }],
+    [
+      { text: "Posts agendados", callback_data: "menu:agendados" },
+      { text: "Posts com erro", callback_data: "menu:erros" },
+    ],
+    [{ text: "Hashtags", callback_data: "menu:hashtags" }, { text: "Limpar chat", callback_data: "menu:limpar" }],
+    [{ text: "Importar posts do Instagram", callback_data: "menu:importar" }],
+    [{ text: "Fechar", callback_data: "menu:fechar" }],
+  ],
+};
+
+const voltar = [{ text: "Voltar", callback_data: "menu:inicio" }];
+
+async function editar(chat_id: number, message_id: number, text: string, reply_markup?: unknown) {
+  await tg("editMessageText", { chat_id, message_id, text, ...(reply_markup ? { reply_markup } : {}) })
+    .catch(() => {});
+}
+
+// Grava na tabela logs o resultado das integrações, os últimos eventos e os posts com problema.
+async function salvarLogs(res: Resultado[]): Promise<number | null> {
+  const { data: eventos } = await db.from("eventos").select("em,etapa,detalhe")
+    .order("id", { ascending: false }).limit(30);
+  const { data: posts } = await db.from("posts").select("id,status,erro_msg,atualizado_em")
+    .in("status", ["erro", "publicando"]).order("atualizado_em", { ascending: false }).limit(10);
+  const falhas = res.filter((r) => !r.ok);
+  const { data, error } = await db.from("logs").insert({
+    nivel: falhas.length ? "erro" : "info",
+    origem: "menu_status",
+    mensagem: falhas.length ? `Falhas: ${falhas.map((f) => f.nome).join(", ")}` : "Todas as integrações ok",
+    detalhe: { integracoes: res, eventos_recentes: eventos, posts_com_problema: posts },
+  }).select("id").single();
+  return error ? null : (data.id as number);
+}
+
+// deno-lint-ignore no-explicit-any
+async function tratarMenu(cb: any, sub: string) {
+  const chat_id: number = cb.message.chat.id;
+  const message_id: number = cb.message.message_id;
+
+  if (sub === "fechar" || sub === "ok") {
+    await apagarMensagens(chat_id, [message_id]);
+    return;
+  }
+  if (sub === "inicio") return editar(chat_id, message_id, "Menu:", tecladoMenu);
+  if (sub === "limpar") {
+    // Mesmo efeito do /limpar: descarta rascunhos pendentes e apaga o chat até esta mensagem.
+    await db.from("posts").update({
+      status: "cancelado",
+      aguardando_horario: false,
+      aguardando_legenda: false,
+      atualizado_em: new Date().toISOString(),
+    }).eq("chat_id", chat_id).eq("status", "rascunho");
+    await limparChat(chat_id, message_id);
+    await enviar(chat_id, "Chat limpo.", { reply_markup: tecladoFixo });
+    return;
+  }
+  if (sub === "importar") {
+    await editar(chat_id, message_id, "Importando os posts do Instagram...");
+    try {
+      const r = await importarPostsDoInstagram(db, chat_id);
+      // Coleta as métricas na hora (a função de métricas valida o mesmo segredo do cron).
+      let metricas = "";
+      try {
+        const resp = await comPrazo(`${Deno.env.get("SUPABASE_URL")}/functions/v1/coletar-metricas`, {
+          method: "POST",
+          headers: { "x-cron-secret": Deno.env.get("CRON_SECRET") ?? "" },
+        }, 50000);
+        const j = await resp.json();
+        metricas = j.ok === false
+          ? `\nMétricas: ${j.motivo ?? "não coletadas"}.`
+          : `\nMétricas gravadas: ${j.gravados} (falhas: ${j.falhas}).`;
+      } catch {
+        metricas = "\nMétricas: ainda não coletadas (rodam sozinhas todo dia).";
+      }
+      return editar(
+        chat_id,
+        message_id,
+        `Importação concluída.\nPosts no perfil: ${r.lidos}\nNovos no banco: ${r.novos}\nJá existiam: ${r.jaExistiam}${metricas}`,
+        { inline_keyboard: [voltar] },
+      );
+    } catch (e) {
+      return editar(chat_id, message_id, `Não consegui importar: ${(e as Error).message}`, { inline_keyboard: [voltar] });
+    }
+  }
+  if (sub === "hashtags") {
+    return editar(chat_id, message_id, await textoHashtags(), { inline_keyboard: [voltar] });
+  }
+  if (sub === "agendados") return mostrarAgendados(chat_id, message_id);
+  if (sub === "erros") return mostrarErros(chat_id, message_id);
+
+  if (sub === "status" || sub === "logs") {
+    await editar(chat_id, message_id, "Verificando integrações...");
+    const res = await verificarIntegracoes(db);
+    const comErro = res.some((r) => !r.ok);
+    let extra = "";
+    if (sub === "logs") {
+      const id = await salvarLogs(res);
+      extra = id ? `\n\nLogs salvos (#${id}).` : "\n\nNão consegui salvar os logs.";
+    }
+    const texto = res.map((r) => `${r.ok ? "✅" : "❌"} ${r.nome}: ${r.detalhe}`).join("\n") + extra;
+    const linha = [{ text: "Confirmar", callback_data: "menu:ok" }];
+    if (comErro && sub !== "logs") linha.push({ text: "Salvar logs", callback_data: "menu:logs" });
+    return editar(chat_id, message_id, texto, { inline_keyboard: [linha] });
+  }
+}
+
+async function mostrarAgendados(chat_id: number, message_id: number) {
+  const { data } = await db.from("posts").select("id,legenda,agendado_para,storage_paths")
+    .eq("chat_id", chat_id).eq("status", "agendado")
+    .order("agendado_para", { ascending: true }).limit(10);
+  if (!data?.length) {
+    return editar(chat_id, message_id, "Posts agendados:\n\nNenhum post agendado.", { inline_keyboard: [voltar] });
+  }
+  const quando = (p: { agendado_para: string }) => formatarHorario(new Date(p.agendado_para));
+  const linhas = data.map((p, i) =>
+    `${i + 1}. ${quando(p)} · ${p.storage_paths.length} foto(s)\n   ${(p.legenda ?? "").split("\n")[0].slice(0, 60)}`
+  );
+  const botoes = data.map((p, i) => [{ text: `Cancelar ${i + 1} (${quando(p)})`, callback_data: `cancelagenda:${p.id}` }]);
+  botoes.push(voltar);
+  return editar(chat_id, message_id, `Posts agendados:\n\n${linhas.join("\n")}`, { inline_keyboard: botoes });
+}
+
+async function mostrarErros(chat_id: number, message_id: number) {
+  const { data } = await db.from("posts").select("id,erro_msg,atualizado_em,storage_paths")
+    .eq("chat_id", chat_id).eq("status", "erro")
+    .order("atualizado_em", { ascending: false }).limit(8);
+  if (!data?.length) {
+    return editar(chat_id, message_id, "Posts com erro:\n\nNenhum post com erro.", { inline_keyboard: [voltar] });
+  }
+  const linhas = data.map((p, i) =>
+    `${i + 1}. ${formatarHorario(new Date(p.atualizado_em))} · ${p.storage_paths.length} foto(s)\n   ${(p.erro_msg ?? "sem detalhe").slice(0, 110)}`
+  );
+  const botoes = data.map((p, i) => [
+    { text: `Tentar de novo ${i + 1}`, callback_data: `retentar:${p.id}` },
+    { text: `Descartar ${i + 1}`, callback_data: `descartar:${p.id}` },
+  ]);
+  botoes.push(voltar);
+  return editar(
+    chat_id,
+    message_id,
+    `Posts com erro:\n\n${linhas.join("\n")}\n\nAntes de tentar de novo, confira o Instagram: se o post já saiu, descarte para não duplicar.`,
+    { inline_keyboard: botoes },
+  );
+}
+
+// deno-lint-ignore no-explicit-any
+async function cancelarAgendado(cb: any, postId: string) {
+  const chat_id: number = cb.message.chat.id;
+  const message_id: number = cb.message.message_id;
+  const { data: post } = await db.from("posts")
+    .update({ status: "cancelado", atualizado_em: new Date().toISOString() })
+    .eq("id", postId).eq("status", "agendado").select("mensagens,storage_paths").maybeSingle();
+  if (!post) {
+    await enviar(chat_id, "Esse post não está mais agendado (talvez já tenha sido publicado).");
+    return;
+  }
+  // Apaga as mensagens do post e as fotos do Storage, como no cancelamento de rascunho.
+  await apagarMensagens(chat_id, post.mensagens ?? []);
+  if (post.storage_paths?.length) await db.storage.from("fotos").remove(post.storage_paths);
+  // Veio da lista do /menu: atualiza a lista. Veio da confirmação do agendamento: apaga essa mensagem.
+  if (String(cb.message.text ?? "").startsWith("Posts agendados")) return mostrarAgendados(chat_id, message_id);
+  await apagarMensagens(chat_id, [message_id]);
+}
+
+// deno-lint-ignore no-explicit-any
+async function retentarPost(cb: any, postId: string) {
+  const chat_id: number = cb.message.chat.id;
+  const { data } = await db.from("posts").update({
+    status: "agendado",
+    agendado_para: new Date().toISOString(),
+    erro_msg: null,
+    atualizado_em: new Date().toISOString(),
+  }).eq("id", postId).eq("status", "erro").select("id").maybeSingle();
+  if (!data) {
+    await enviar(chat_id, "Esse post não está mais com erro.");
+  } else {
+    await enviar(chat_id, "Vou tentar publicar de novo. Sai em até 1 minuto e eu aviso o resultado.");
+  }
+  return mostrarErros(chat_id, cb.message.message_id);
+}
+
+// deno-lint-ignore no-explicit-any
+async function descartarPost(cb: any, postId: string) {
+  const chat_id: number = cb.message.chat.id;
+  const { data: post } = await db.from("posts")
+    .update({ status: "cancelado", atualizado_em: new Date().toISOString() })
+    .eq("id", postId).eq("status", "erro").select("storage_paths").maybeSingle();
+  if (post?.storage_paths?.length) await db.storage.from("fotos").remove(post.storage_paths);
+  return mostrarErros(chat_id, cb.message.message_id);
 }
 
 /** Texto livre do dono: se há um post esperando legenda manual, o texto vira a legenda. Devolve false se não há. */
@@ -500,11 +775,18 @@ async function processar(update: any) {
     trace("estourou_prazo", null, chat_id ?? null);
     await enviar(chat_id!, "Isso demorou demais e não terminei. Mande a foto de novo.").catch(() => {});
   }, 110000);
+  // "digitando..." dura só 5 s no Telegram: reenvia a cada 4 s até terminar, para indicar que está processando.
+  const sinal = () => {
+    if (chat_id === ALLOWED_CHAT_ID) tg("sendChatAction", { chat_id, action: "typing" }).catch(() => {});
+  };
+  sinal();
+  const indicador = setInterval(sinal, 4000);
   try {
     await processarUpdate(update);
   } finally {
     terminou = true;
     clearTimeout(vigia);
+    clearInterval(indicador);
   }
 }
 
@@ -518,8 +800,21 @@ async function processarUpdate(update: any) {
     if (msg?.text?.startsWith("/start")) {
       // Único caso aceito de qualquer chat: mostra o chat_id para configurar ALLOWED_CHAT_ID.
       await enviar(chat_id!, `Seu chat_id: ${chat_id}\n${chat_id === ALLOWED_CHAT_ID ? "Autorizado." : "Não autorizado ainda."}`);
+      // Autorizado: manda também os botões fixos no lugar do teclado.
+      if (chat_id === ALLOWED_CHAT_ID) await enviar(chat_id!, "Use os botões abaixo.", { reply_markup: tecladoFixo });
     } else if (chat_id !== ALLOWED_CHAT_ID) {
       // ignora em silêncio
+    } else if (/^(\/menu|menu)$/i.test(msg?.text?.trim() ?? "")) {
+      // Vale para o comando /menu e para o botão fixo "Menu".
+      await enviar(chat_id!, "Menu:", { reply_markup: tecladoMenu });
+    } else if (/^\/hashtags/i.test(msg?.text?.trim() ?? "")) {
+      await mostrarHashtags(chat_id!);
+    } else if (/^criar postagem$/i.test(msg?.text?.trim() ?? "")) {
+      // O Telegram não deixa o bot abrir o seletor de arquivos: a mensagem orienta o próximo passo.
+      await enviar(
+        chat_id!,
+        "Envie a foto agora (use o clipe ao lado do campo de texto). Para carrossel, envie várias de uma vez. Se quiser, escreva uma dica na legenda da foto.",
+      );
     } else if (msg?.text?.trim().startsWith("/contexto")) {
       // /contexto mostra o texto atual; /contexto <texto> troca por um novo.
       const novo = msg.text.trim().replace(/^\/contexto(@\S+)?/, "").trim();
@@ -542,7 +837,7 @@ async function processarUpdate(update: any) {
       }).eq("chat_id", chat_id).eq("status", "rascunho");
       trace("limpar", `ate=${msg.message_id}`, chat_id);
       await limparChat(chat_id!, msg.message_id);
-      await enviar(chat_id!, "Chat limpo.");
+      await enviar(chat_id!, "Chat limpo.", { reply_markup: tecladoFixo });
     } else if (cb) {
       await tratarBotao(cb);
     } else if (msg?.photo || msg?.document) {

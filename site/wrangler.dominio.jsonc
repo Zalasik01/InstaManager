@@ -1,0 +1,18 @@
+{
+  // Configuração final: liga o domínio polo9n.com.br ao Worker.
+  // Só funciona depois que a zona polo9n.com.br estiver "Ativa" no Cloudflare
+  // (servidores de nomes trocados no Registro.br). Publicar com:
+  //   npx wrangler deploy -c wrangler.dominio.jsonc
+  "name": "polo9n",
+  "compatibility_date": "2026-11-25",
+  "workers_dev": true,
+  "assets": {
+    "directory": "./public",
+    "html_handling": "auto-trailing-slash",
+    "not_found_handling": "404-page"
+  },
+  "routes": [
+    { "pattern": "polo9n.com.br", "custom_domain": true },
+    { "pattern": "www.polo9n.com.br", "custom_domain": true }
+  ]
+}

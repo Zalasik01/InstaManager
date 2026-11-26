@@ -1,13 +1,13 @@
 {
+  // Configuração provisória: publica só no endereço gratuito polo9n.<conta>.workers.dev.
+  // Quando o domínio polo9n.com.br estiver ativo no Cloudflare, use wrangler.dominio.jsonc
+  // (npx wrangler deploy -c wrangler.dominio.jsonc) para ligar o domínio.
   "name": "polo9n",
   "compatibility_date": "2026-11-25",
+  "workers_dev": true,
   "assets": {
     "directory": "./public",
     "html_handling": "auto-trailing-slash",
     "not_found_handling": "404-page"
-  },
-  "routes": [
-    { "pattern": "polo9n.com.br", "custom_domain": true },
-    { "pattern": "www.polo9n.com.br", "custom_domain": true }
-  ]
+  }
 }

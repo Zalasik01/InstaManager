@@ -41,6 +41,28 @@ Deno.serve(async (req) => {
     return new Response("forbidden", { status: 403 });
   }
 
+  // Recupera posts travados em 'publicando' (a função morreu no meio, por exemplo por timeout).
+  // Vão para 'erro' num único update atômico. Não republica sozinho, para não duplicar o post.
+  const limiteTravado = new Date(Date.now() - 10 * 60 * 1000).toISOString();
+  const { data: travados, error: erroTravados } = await db
+    .from("posts")
+    .update({
+      status: "erro",
+      erro_msg: "Travou ao publicar (sem resposta por mais de 10 min). Confira o Instagram antes de tentar de novo.",
+      atualizado_em: new Date().toISOString(),
+    })
+    .eq("status", "publicando")
+    .lt("atualizado_em", limiteTravado)
+    .select("id,chat_id");
+  if (erroTravados) console.error("recuperar travados falhou", erroTravados);
+  for (const t of travados ?? []) {
+    await avisar(
+      t.chat_id,
+      "Um post travou ao publicar e foi marcado com erro. Confira o Instagram e, se não saiu, use /menu > Com erro para tentar de novo.",
+    );
+  }
+  const recuperados = travados?.length ?? 0;
+
   const agora = new Date().toISOString();
   const { data: vencidos, error } = await db
     .from("posts")
@@ -81,6 +103,7 @@ Deno.serve(async (req) => {
       }).eq("id", id);
       publicados++;
       await avisar(post.chat_id, "Post agendado publicado no Instagram.");
+      await db.rpc("registrar_usos_hashtags", { p_post_id: post.id }); // conta o uso de cada hashtag
       await arquivarPostNoDrive(db, post);
     } catch (e) {
       const msg = (e as Error).message;
@@ -94,5 +117,5 @@ Deno.serve(async (req) => {
     }
   }
 
-  return Response.json({ encontrados: vencidos?.length ?? 0, publicados, falhas });
+  return Response.json({ encontrados: vencidos?.length ?? 0, publicados, falhas, recuperados });
 });
