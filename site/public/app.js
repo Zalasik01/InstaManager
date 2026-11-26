@@ -232,6 +232,17 @@
     $('mais-wrap').hidden = !(posts.length < total);
   }
 
+  /* Seguidores: vem do banco (atualizado todo dia), nunca direto do Instagram. Sem número, o contador fica escondido. */
+  function carregarPerfil() {
+    var li = $('st-seg-li');
+    function mostrar(n) { $('st-seg').textContent = fmt(n); li.hidden = false; }
+    if (DEMO) { mostrar(1284); return; }
+    fetch('/api/perfil', { headers: { Accept: 'application/json' } })
+      .then(function (r) { if (!r.ok) throw new Error('perfil ' + r.status); return r.json(); })
+      .then(function (j) { var n = num(j.seguidores); if (n != null) mostrar(n); })
+      .catch(function () { /* sem o número: o contador continua escondido */ });
+  }
+
   function carregar() {
     if (carregando) return Promise.resolve();
     carregando = true;
@@ -265,6 +276,18 @@
     var multi = imgs.length > 1;
     var s = separar(p.legenda);
     var im = $('v-img');
+    // Proporção do Instagram: a 1ª imagem do post define a caixa (o carrossel inteiro segue ela).
+    var dlgV = $('viewer');
+    var proporcao = function (cls) {
+      ['r-45', 'r-11', 'r-43', 'r-191'].forEach(function (c) { dlgV.classList.toggle(c, c === cls); });
+    };
+    proporcao(p._cls || 'r-45'); // padrão 4:5: evita salto de layout antes de a imagem carregar
+    im.onload = function () {
+      if (imgIdx !== 0 && p._cls) return;
+      var r = im.naturalWidth / im.naturalHeight;
+      p._cls = r <= 0.9 ? 'r-45' : r < 1.15 ? 'r-11' : r < 1.6 ? 'r-43' : 'r-191';
+      proporcao(p._cls);
+    };
     im.src = imgs[imgIdx] || '';
     im.alt = 'Imagem ' + (imgIdx + 1) + ' de ' + imgs.length + (s.texto ? '. ' + resumo(p) : '. Foto do Polo 9n4');
     $('v-iprev').hidden = !multi;
@@ -457,7 +480,8 @@
   var recarregarAoTrocar = false;
 
   function instalado() {
-    return (window.matchMedia && window.matchMedia('(display-mode: standalone)').matches) || navigator.standalone === true;
+    var mm = window.matchMedia;
+    return (mm && (mm('(display-mode: standalone)').matches || mm('(display-mode: fullscreen)').matches)) || navigator.standalone === true;
   }
 
   function guardado(chave) { try { return localStorage.getItem(chave); } catch (e) { return null; } }
@@ -708,6 +732,7 @@
     else if (location.hash === '#posts') { aba('posts'); $('tab-posts').scrollIntoView(); }
     registrarSW();
     iniciarInstalacao();
+    carregarPerfil();
     carregar().then(function () { var id = idDoHash(); if (id) abrirPorId(id, 1); });
   }
 

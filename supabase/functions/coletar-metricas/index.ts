@@ -27,6 +27,28 @@ class ErroGraph extends Error {
   }
 }
 
+/** Lê seguidores, seguindo e total de posts do perfil e grava em perfil_ig (o site lê de lá). */
+async function atualizarPerfil(): Promise<{ seguidores: number | null }> {
+  const ig = Deno.env.get("IG_USER_ID");
+  const token = Deno.env.get("IG_ACCESS_TOKEN");
+  if (!ig || !token) throw new Error("secrets do Instagram ausentes");
+  const r = await fetch(
+    `https://graph.facebook.com/v23.0/${ig}?fields=followers_count,follows_count,media_count`,
+    { headers: { Authorization: `Bearer ${token}` }, signal: AbortSignal.timeout(15000) },
+  );
+  const j = await r.json();
+  if (!r.ok) throw new Error(j?.error?.message ?? `HTTP ${r.status}`);
+  const { error } = await db.from("perfil_ig").upsert({
+    id: 1,
+    seguidores: j.followers_count ?? null,
+    seguindo: j.follows_count ?? null,
+    midias: j.media_count ?? null,
+    atualizado_em: new Date().toISOString(),
+  });
+  if (error) throw new Error(error.message);
+  return { seguidores: j.followers_count ?? null };
+}
+
 // Conjuntos de métricas, do mais completo ao mais enxuto (tipos de mídia aceitam métricas diferentes).
 // `views` (visualizações) é a métrica nova que substitui impressions/plays; vem primeiro e,
 // se algum tipo de mídia recusar, os conjuntos seguintes tiram `views` e seguem sem ela.
@@ -166,6 +188,15 @@ Deno.serve(async (req) => {
 
   let gravados = 0;
   const falhas: string[] = [];
+
+  // Números do perfil (seguidores etc.) para o site: independente dos posts e da permissão de insights.
+  let perfil: { seguidores: number | null } | null = null;
+  try {
+    perfil = await atualizarPerfil();
+  } catch (e) {
+    falhas.push(`perfil: ${(e as Error).message}`);
+  }
+
   for (const p of posts ?? []) {
     try {
       const m = await buscarInsights(p.ig_media_id!);
@@ -209,5 +240,6 @@ Deno.serve(async (req) => {
     falhas: falhas.length,
     detalhes: falhas.slice(0, 3).map((f) => f.slice(0, 300)),
     aprendizado,
+    perfil,
   });
 });

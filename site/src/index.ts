@@ -76,6 +76,25 @@ async function posts(url: URL, env: Env): Promise<Response> {
   }
 }
 
+type PerfilRpc = { seguidores: number | null; seguindo: number | null; midias: number | null; atualizado_em: string };
+
+async function perfil(env: Env): Promise<Response> {
+  try {
+    const linhas = await rpc<PerfilRpc[]>(env, "obter_perfil_publico", {});
+    const p = linhas[0];
+    return json(
+      p
+        ? { seguidores: p.seguidores, seguindo: p.seguindo, posts: p.midias, atualizado_em: p.atualizado_em }
+        : { seguidores: null, seguindo: null, posts: null, atualizado_em: null },
+      200,
+      // Os números mudam devagar (coleta diária): 5 minutos de cache bastam.
+      "public, max-age=300, s-maxage=300",
+    );
+  } catch {
+    return json({ erro: "Não consegui carregar o perfil agora." }, 502);
+  }
+}
+
 export default {
   async fetch(request: Request, env: Env): Promise<Response> {
     const url = new URL(request.url);
@@ -86,8 +105,13 @@ export default {
       return Response.redirect(url.toString(), 301);
     }
 
-    const resposta = url.pathname === "/api/posts"
-      ? (request.method !== "GET" ? json({ erro: "método não permitido" }, 405) : await posts(url, env))
+    const api = url.pathname === "/api/posts" || url.pathname === "/api/perfil";
+    const resposta = api && request.method !== "GET"
+      ? json({ erro: "método não permitido" }, 405)
+      : url.pathname === "/api/posts"
+      ? await posts(url, env)
+      : url.pathname === "/api/perfil"
+      ? await perfil(env)
       : await env.ASSETS.fetch(request);
 
     // O endereço provisório *.workers.dev não deve ser indexado (evita conteúdo duplicado com o domínio).

@@ -1,7 +1,7 @@
 'use strict';
 
 // Mude VERSAO a cada publicação que altere o shell para renovar os caches.
-const VERSAO = 'v5';
+const VERSAO = 'v7';
 const CACHE_SHELL = 'polo9n-shell-' + VERSAO;
 const CACHE_API = 'polo9n-api-' + VERSAO;
 const CACHE_IMG = 'polo9n-img-' + VERSAO;
@@ -135,7 +135,7 @@ self.addEventListener('fetch', function (event) {
   if (req.mode === 'navigate') { event.respondWith(navegacao(event)); return; }
   if (url.pathname === '/sw.js') return;
 
-  if (url.pathname === '/api/posts') {
+  if (url.pathname === '/api/posts' || url.pathname === '/api/perfil') {
     event.respondWith(staleWhileRevalidate(event, CACHE_API, MAX_API, false));
     return;
   }

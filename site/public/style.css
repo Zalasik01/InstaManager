@@ -163,6 +163,13 @@ dialog.viewer {
   background: transparent; color: var(--fg); overflow: hidden; overscroll-behavior: contain;
 }
 dialog.viewer[open] { display: grid; place-items: center; }
+/* Proporções do próprio Instagram: a classe r-* (posta pelo JS conforme a 1ª imagem) define a altura da mídia.
+   --hdr = altura do cabeçalho (avatar e nome); --mh = altura da imagem, limitada a 62% da tela. */
+dialog.viewer { --hdr: calc(3.2rem + env(safe-area-inset-top)); --mh: min(125vw, 62dvh); }
+dialog.viewer.r-45 { --mh: min(125vw, 62dvh); }
+dialog.viewer.r-11 { --mh: min(100vw, 62dvh); }
+dialog.viewer.r-43 { --mh: min(75vw, 62dvh); }
+dialog.viewer.r-191 { --mh: min(52.4vw, 62dvh); }
 dialog.viewer::backdrop { background: rgba(0,0,0,.78); }
 @supports (backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px)) {
   dialog.viewer::backdrop { background: rgba(0,0,0,.6); -webkit-backdrop-filter: blur(14px); backdrop-filter: blur(14px); }
@@ -172,14 +179,14 @@ dialog.viewer::backdrop { background: rgba(0,0,0,.78); }
 .icon-btn svg { width: 1.4rem; height: 1.4rem; }
 .v-x, .v-post, .v-arrow, .z-arrow { background: rgba(0,0,0,.55); color: #fff; touch-action: manipulation; }
 .v-x:hover, .v-post:hover, .v-arrow:hover, .z-arrow:hover { background: rgba(0,0,0,.85); }
-.v-x { position: fixed; z-index: 5; top: calc(.5rem + env(safe-area-inset-top)); right: calc(.5rem + env(safe-area-inset-right)); }
-.v-post { position: fixed; z-index: 5; top: calc(env(safe-area-inset-top) + min(100vw, 58dvh) / 2); transform: translateY(-50%); }
+.v-x { position: fixed; z-index: 5; top: calc(.2rem + env(safe-area-inset-top)); right: calc(.4rem + env(safe-area-inset-right)); background: none; }
+.v-post { position: fixed; z-index: 5; top: calc(var(--hdr) + var(--mh) / 2); transform: translateY(-50%); }
 .v-pl { left: calc(.5rem + env(safe-area-inset-left)); }
 .v-pr { right: calc(.5rem + env(safe-area-inset-right)); }
 .v-box { display: flex; flex-direction: column; width: 100%; height: 100vh; height: 100dvh; background: var(--bg); overflow: hidden; }
 .viewer[open] .v-box { animation: v-in .18s ease-out; }
 @keyframes v-in { from { opacity: 0; transform: scale(.97); } }
-.v-media { position: relative; flex: none; background: #000; height: min(100vw, 58dvh); padding-top: env(safe-area-inset-top); display: grid; place-items: center; touch-action: pan-y pinch-zoom; }
+.v-media { position: relative; order: 1; flex: none; width: 100%; background: #000; height: var(--mh); display: grid; place-items: center; touch-action: pan-y pinch-zoom; }
 .v-media img { width: 100%; height: 100%; object-fit: contain; display: block; }
 .v-arrow, .z-arrow { position: absolute; z-index: 2; top: 50%; transform: translateY(-50%); }
 .v-arrow { display: none; }
@@ -188,23 +195,31 @@ dialog.viewer::backdrop { background: rgba(0,0,0,.78); }
 .dots { position: absolute; bottom: .6rem; left: 0; right: 0; display: flex; justify-content: center; gap: .35rem; }
 .dots i { width: .4rem; height: .4rem; border-radius: 50%; background: rgba(255,255,255,.4); }
 .dots i.on { background: var(--accent); }
-.v-info { flex: 1; min-height: 0; display: flex; flex-direction: column; }
-.v-top { display: flex; align-items: center; gap: .6rem; padding: .7rem max(1rem, env(safe-area-inset-right)) .7rem max(1rem, env(safe-area-inset-left)); border-bottom: 1px solid var(--line); font-size: .9rem; }
+/* O painel deixa de ser uma caixa própria: cabeçalho, legenda, ações e contador viram itens do .v-box e
+   ganham a ordem do Instagram (cabeçalho, imagem, legenda rolável, ações fixas). */
+.v-info { display: contents; }
+.v-top { order: 0; flex: none; box-sizing: border-box; min-height: var(--hdr); display: flex; align-items: center; gap: .6rem; padding: env(safe-area-inset-top) 3.4rem 0 max(1rem, env(safe-area-inset-left)); border-bottom: 1px solid var(--line); font-size: .9rem; }
 .v-av { width: 2rem; height: 2rem; border-radius: 50%; object-fit: cover; }
-.v-scroll { flex: 1; min-height: 0; overflow-y: auto; overscroll-behavior: contain; padding: .9rem max(1rem, env(safe-area-inset-right)) .5rem max(1rem, env(safe-area-inset-left)); }
+.v-scroll { order: 2; flex: 1 1 auto; min-height: 0; overflow-y: auto; overscroll-behavior: contain; padding: .9rem max(1rem, env(safe-area-inset-right)) .5rem max(1rem, env(safe-area-inset-left)); }
 .v-nums { margin: 0 0 .7rem; font-size: .85rem; font-weight: 700; }
 .v-cap { margin: 0 0 .9rem; white-space: pre-line; overflow-wrap: anywhere; font-size: .95rem; }
 .chips { list-style: none; margin: 0 0 .9rem; padding: 0; display: flex; flex-wrap: wrap; gap: .4rem; }
 .chips li { padding: .15rem .6rem; border: 1px solid var(--line); border-radius: 999px; font-size: .82rem; color: var(--accent); }
 .v-date { color: var(--muted); font-size: .8rem; margin: 0 0 .5rem; }
-.v-actions { display: flex; flex-wrap: wrap; gap: .5rem; align-items: center; padding: .6rem max(1rem, env(safe-area-inset-right)) .4rem max(1rem, env(safe-area-inset-left)); border-top: 1px solid var(--line); }
+.v-actions { order: 3; flex: none; display: flex; flex-wrap: wrap; gap: .5rem; align-items: center; padding: .6rem max(1rem, env(safe-area-inset-right)) .4rem max(1rem, env(safe-area-inset-left)); border-top: 1px solid var(--line); }
 .v-actions a { display: inline-flex; align-items: center; min-height: 44px; font-size: .9rem; }
-.v-count { margin: 0; padding: 0 max(1rem, env(safe-area-inset-right)) calc(.6rem + env(safe-area-inset-bottom)) max(1rem, env(safe-area-inset-left)); color: var(--muted); font-size: .75rem; }
+.v-count { order: 4; flex: none; margin: 0; padding: 0 max(1rem, env(safe-area-inset-right)) calc(.6rem + env(safe-area-inset-bottom)) max(1rem, env(safe-area-inset-left)); color: var(--muted); font-size: .75rem; }
 @media (min-width: 640px) {
-  .v-box { display: grid; grid-template-columns: minmax(0, 1fr) 23rem; width: min(calc(100vw - 9rem), 1100px); height: min(88dvh, 56rem); border-radius: 12px; }
+  .v-box { display: grid; grid-template-columns: minmax(0, 1fr) 23rem; grid-template-rows: auto minmax(0, 1fr) auto auto; width: min(calc(100vw - 9rem), 1100px); height: min(88dvh, 56rem); border-radius: 12px; }
   .v-box.compact { grid-template-columns: minmax(0, 1fr) 16rem; }
-  .v-media { height: 100%; padding-top: 0; }
-  .v-info { border-left: 1px solid var(--line); }
+  /* Desktop: a imagem ocupa a coluna inteira (contain); o painel fica na coluna da direita. */
+  .v-media { grid-column: 1; grid-row: 1 / -1; width: auto; height: 100%; }
+  .v-top, .v-scroll, .v-actions, .v-count { grid-column: 2; border-left: 1px solid var(--line); }
+  .v-top { grid-row: 1; min-height: 3.2rem; padding: 0 1rem; }
+  .v-scroll { grid-row: 2; }
+  .v-actions { grid-row: 3; }
+  .v-count { grid-row: 4; }
+  .v-x { background: rgba(0,0,0,.55); top: calc(.5rem + env(safe-area-inset-top)); right: calc(.5rem + env(safe-area-inset-right)); }
   .v-arrow { display: inline-grid; }
   .v-post { top: 50%; }
   .v-pl { left: calc(1rem + env(safe-area-inset-left)); }
@@ -269,4 +284,4 @@ footer a:hover { color: var(--fg); }
 .doc .btn { cursor: pointer; border: 0; font: inherit; font-weight: 700; }
 
 /* app instalado: some o que só serve no navegador */
-@media (display-mode: standalone) { .so-navegador { display: none !important; } }
+@media (display-mode: standalone), (display-mode: fullscreen) { .so-navegador { display: none !important; } }
