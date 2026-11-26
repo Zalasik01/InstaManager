@@ -5,6 +5,7 @@
 import { createClient } from "npm:@supabase/supabase-js@2";
 import { publicarNoInstagram } from "../_shared/instagram.ts";
 import { arquivarPostNoDrive } from "../_shared/arquivar.ts";
+import { enviarResumoPublicacao } from "../_shared/pospublicacao.ts";
 
 const LIMITE_POR_EXECUCAO = 5;
 
@@ -103,6 +104,7 @@ Deno.serve(async (req) => {
       }).eq("id", id);
       publicados++;
       await avisar(post.chat_id, "Post agendado publicado no Instagram.");
+      await enviarResumoPublicacao(db, post.chat_id, igId, post.id); // link, QR code e embed
       await db.rpc("registrar_usos_hashtags", { p_post_id: post.id }); // conta o uso de cada hashtag
       await arquivarPostNoDrive(db, post);
     } catch (e) {

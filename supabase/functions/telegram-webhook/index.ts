@@ -7,8 +7,9 @@ import { createClient } from "npm:@supabase/supabase-js@2";
 import { encodeBase64 } from "jsr:@std/encoding@1/base64";
 import { publicarNoInstagram } from "../_shared/instagram.ts";
 import { arquivarPostNoDrive } from "../_shared/arquivar.ts";
+import { enviarResumoPublicacao } from "../_shared/pospublicacao.ts";
 import { type Resultado, verificarIntegracoes } from "../_shared/status.ts";
-import { importarPostsDoInstagram } from "../_shared/importar.ts";
+import { executar as executarSync, planejar as planejarSync } from "../_shared/sincronizar.ts";
 import { formatarHorario, horaPronta, interpretarHorario } from "../_shared/horario.ts";
 
 const TOKEN = Deno.env.get("TELEGRAM_BOT_TOKEN")!;
@@ -52,7 +53,10 @@ const teclado = (postId: string) => ({
       { text: "Regerar legenda", callback_data: `regerar:${postId}` },
       { text: "Definir legenda manualmente", callback_data: `manual:${postId}` },
     ],
-    [{ text: "Cancelar", callback_data: `cancelar:${postId}` }],
+    [
+      { text: "Só hashtags", callback_data: `sohash:${postId}` },
+      { text: "Cancelar", callback_data: `cancelar:${postId}` },
+    ],
   ],
 });
 
@@ -398,6 +402,15 @@ async function tratarBotao(cb: any) {
     return lembrar([idDe(r)], { postId });
   }
 
+  if (acao === "sohash") {
+    // Troca a legenda só pelas hashtags que já estão nela, e atualiza a própria prévia.
+    const tags = (post.legenda ?? "").match(/#[\p{L}\p{N}_]+/gu);
+    if (!tags?.length) return enviar(chat_id, "Esta legenda não tem hashtags para manter.");
+    const legenda = [...new Set(tags)].join(" ");
+    await db.from("posts").update({ legenda, atualizado_em: new Date().toISOString() }).eq("id", postId);
+    return editar(chat_id, cb.message.message_id, `Legenda só com hashtags:\n\n${legenda}`, teclado(postId));
+  }
+
   if (acao === "manual") {
     // O próximo texto do dono vira a legenda deste post. Só um post por vez espera texto.
     await db.from("posts").update({ aguardando_legenda: false, aguardando_horario: false })
@@ -424,6 +437,7 @@ async function tratarBotao(cb: any) {
         atualizado_em: new Date().toISOString(),
       }).eq("id", postId);
       await enviar(chat_id, "Publicado no Instagram.");
+      await enviarResumoPublicacao(db, chat_id, igId, postId); // link, QR code e embed
       await db.rpc("registrar_usos_hashtags", { p_post_id: postId }); // conta o uso de cada hashtag
       await arquivarPostNoDrive(db, post);
       return;
@@ -544,7 +558,7 @@ const tecladoMenu = {
       { text: "Posts com erro", callback_data: "menu:erros" },
     ],
     [{ text: "Hashtags", callback_data: "menu:hashtags" }, { text: "Limpar chat", callback_data: "menu:limpar" }],
-    [{ text: "Importar posts do Instagram", callback_data: "menu:importar" }],
+    [{ text: "Sincronizar com o Instagram", callback_data: "menu:sync" }],
     [{ text: "Fechar", callback_data: "menu:fechar" }],
   ],
 };
@@ -594,32 +608,69 @@ async function tratarMenu(cb: any, sub: string) {
     await enviar(chat_id, "Chat limpo.", { reply_markup: tecladoFixo });
     return;
   }
-  if (sub === "importar") {
-    await editar(chat_id, message_id, "Importando os posts do Instagram...");
+  if (sub === "sync") {
+    // Passo 1: só compara e mostra o plano. Nada é alterado até o dono confirmar.
+    await editar(chat_id, message_id, "Comparando o banco com o Instagram...");
     try {
-      const r = await importarPostsDoInstagram(db, chat_id);
+      const p = await planejarSync(db);
+      const nada = !p.importar.length && !p.remover.length && !p.semImagem.length;
+      const linhas = [
+        "Sincronizar com o Instagram",
+        `No perfil: ${p.noInstagram} posts. No banco: ${p.noBanco} posts.`,
+        `• Importar (novos no Instagram): ${p.importar.length}`,
+        `• Remover (não existem mais no Instagram): ${p.remover.length}`,
+        ...p.remover.slice(0, 6).map((x) =>
+          `   - ${formatarHorario(new Date(x.agendado_para ?? x.atualizado_em))}: ${(x.legenda ?? "").split("\n")[0].slice(0, 40) || "(sem legenda)"}`
+        ),
+        p.driveAtivo
+          ? `• Imagens a arquivar no Drive: ${p.importar.length + p.semImagem.length} post(s)`
+          : "• Drive não configurado: as imagens não serão importadas.",
+      ];
+      if (p.avisoRemocao) linhas.push("", `Atenção: ${p.avisoRemocao}`);
+      if (p.remover.length) {
+        linhas.push("", "As fotos removidas vão para a lixeira do Drive (dá para recuperar por 30 dias). As linhas do banco e as métricas deles são apagadas de vez.");
+      }
+      if (nada) {
+        return editar(chat_id, message_id, `${linhas.join("\n")}\n\nTudo sincronizado, nada a fazer.`, { inline_keyboard: [voltar] });
+      }
+      return editar(chat_id, message_id, linhas.join("\n"), {
+        inline_keyboard: [[{ text: "Confirmar sincronização", callback_data: "menu:syncok" }], voltar],
+      });
+    } catch (e) {
+      return editar(chat_id, message_id, `Não consegui comparar: ${(e as Error).message}\nNada foi alterado.`, { inline_keyboard: [voltar] });
+    }
+  }
+  if (sub === "syncok") {
+    // Passo 2: recalcula o plano na hora (pode ter mudado) e executa.
+    await editar(chat_id, message_id, "Sincronizando... pode levar até 1 minuto.");
+    try {
+      const plano = await planejarSync(db);
+      const r = await executarSync(db, chat_id, plano);
       // Coleta as métricas na hora (a função de métricas valida o mesmo segredo do cron).
       let metricas = "";
       try {
         const resp = await comPrazo(`${Deno.env.get("SUPABASE_URL")}/functions/v1/coletar-metricas`, {
           method: "POST",
           headers: { "x-cron-secret": Deno.env.get("CRON_SECRET") ?? "" },
-        }, 50000);
+        }, 45000);
         const j = await resp.json();
         metricas = j.ok === false
           ? `\nMétricas: ${j.motivo ?? "não coletadas"}.`
           : `\nMétricas gravadas: ${j.gravados} (falhas: ${j.falhas}).`;
       } catch {
-        metricas = "\nMétricas: ainda não coletadas (rodam sozinhas todo dia).";
+        metricas = "\nMétricas: rodam sozinhas todo dia.";
       }
-      return editar(
-        chat_id,
-        message_id,
-        `Importação concluída.\nPosts no perfil: ${r.lidos}\nNovos no banco: ${r.novos}\nJá existiam: ${r.jaExistiam}${metricas}`,
-        { inline_keyboard: [voltar] },
-      );
+      const linhas = [
+        "Sincronização concluída.",
+        `Importados: ${r.importados}`,
+        `Removidos: ${r.removidos} (${r.arquivosNaLixeira} arquivo(s) na lixeira do Drive)`,
+        `Imagens arquivadas no Drive: ${r.imagensArquivadas}`,
+      ];
+      if (r.restantes) linhas.push(`Faltam ${r.restantes} imagem(ns). Sincronize de novo para continuar.`);
+      if (r.falhas.length) linhas.push("", `Falhas (${r.falhas.length}):`, ...r.falhas.slice(0, 4));
+      return editar(chat_id, message_id, linhas.join("\n") + metricas, { inline_keyboard: [voltar] });
     } catch (e) {
-      return editar(chat_id, message_id, `Não consegui importar: ${(e as Error).message}`, { inline_keyboard: [voltar] });
+      return editar(chat_id, message_id, `Não consegui sincronizar: ${(e as Error).message}`, { inline_keyboard: [voltar] });
     }
   }
   if (sub === "hashtags") {

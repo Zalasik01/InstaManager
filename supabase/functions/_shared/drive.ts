@@ -92,6 +92,18 @@ async function acharOuCriarPasta(nome: string, pai: string): Promise<string> {
   return criada.id;
 }
 
+/** Manda um arquivo para a lixeira do Drive (recuperável por 30 dias). Arquivo que já não existe (404) é ignorado. */
+export async function moverParaLixeira(id: string): Promise<void> {
+  const r = await fetch(`${API}/files/${encodeURIComponent(id)}?supportsAllDrives=true&fields=id`, {
+    method: "PATCH",
+    headers: { Authorization: `Bearer ${await accessToken()}`, "Content-Type": "application/json" },
+    body: JSON.stringify({ trashed: true }),
+  });
+  if (!r.ok && r.status !== 404) {
+    throw new Error(`Drive: falha ao mandar para a lixeira (${r.status}): ${await lerErro(r)}`);
+  }
+}
+
 /** Envia o JPEG para PASTA_RAIZ/AAAA/MM/DD (data em UTC, igual ao caminho do Storage). Devolve o id do arquivo. */
 export async function enviarParaDrive(bytes: Uint8Array, nomeArquivo: string, data: Date): Promise<string> {
   const ano = String(data.getUTCFullYear());
