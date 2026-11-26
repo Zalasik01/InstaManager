@@ -622,12 +622,13 @@ async function tratarMenu(cb: any, sub: string) {
     await editar(chat_id, message_id, "Comparando o banco com o Instagram...");
     try {
       const p = await planejarSync(db);
-      const nada = !p.importar.length && !p.remover.length && !p.semImagem.length;
+      const nada = !p.importar.length && !p.remover.length && !p.semImagem.length && !p.semLink.length;
       const linhas = [
         "Sincronizar com o Instagram",
         `No perfil: ${p.noInstagram} posts. No banco: ${p.noBanco} posts.`,
         `• Importar (novos no Instagram): ${p.importar.length}`,
         `• Remover (não existem mais no Instagram): ${p.remover.length}`,
+        ...(p.semLink.length ? [`• Preencher o link do Instagram em ${p.semLink.length} post(s)`] : []),
         ...p.remover.slice(0, 6).map((x) =>
           `   - ${formatarHorario(new Date(x.agendado_para ?? x.atualizado_em))}: ${(x.legenda ?? "").split("\n")[0].slice(0, 40) || "(sem legenda)"}`
         ),

@@ -24,6 +24,7 @@ Deno.serve(async (req) => {
       importar: plano.importar.length,
       remover: plano.remover.length,
       semImagem: plano.semImagem.length,
+      semLink: plano.semLink.length,
       driveAtivo: plano.driveAtivo,
       avisoRemocao: plano.avisoRemocao ?? null,
     };

@@ -43,6 +43,7 @@ type PostBanco = {
   atualizado_em: string;
   drive_file_ids: string[];
   galeria_paths: string[];
+  permalink: string | null;
   origem: string;
 };
 
@@ -55,6 +56,7 @@ export type Plano = {
   importar: Midia[];
   remover: PostBanco[];
   semImagem: SemImagem[];
+  semLink: { id: string; permalink: string }[]; // posts que já estão no banco sem o link do Instagram
   driveAtivo: boolean;
   avisoRemocao?: string; // motivo de as remoções terem sido canceladas
 };
@@ -108,7 +110,7 @@ export async function planejar(db: SupabaseClient): Promise<Plano> {
   const ids = new Set(midias.map((m) => m.id));
 
   const { data, error } = await db.from("posts")
-    .select("id,ig_media_id,legenda,agendado_para,atualizado_em,drive_file_ids,galeria_paths,origem")
+    .select("id,ig_media_id,legenda,agendado_para,atualizado_em,drive_file_ids,galeria_paths,permalink,origem")
     .eq("status", "publicado").not("ig_media_id", "is", null);
   if (error) throw new Error(`Banco: ${error.message}`);
   const banco = (data ?? []) as PostBanco[];
@@ -138,7 +140,21 @@ export async function planejar(db: SupabaseClient): Promise<Plano> {
     }))
     .filter((x) => x.drive || x.galeria);
 
-  return { noInstagram: midias.length, noBanco: banco.length, importar, remover, semImagem, driveAtivo: driveAtivo(), avisoRemocao };
+  // Posts importados antes de o link ser gravado: o link vem da lista do Instagram.
+  const semLink = banco
+    .filter((p) => !p.permalink && porId.get(p.ig_media_id)?.permalink)
+    .map((p) => ({ id: p.id, permalink: porId.get(p.ig_media_id)!.permalink! }));
+
+  return {
+    noInstagram: midias.length,
+    noBanco: banco.length,
+    importar,
+    remover,
+    semImagem,
+    semLink,
+    driveAtivo: driveAtivo(),
+    avisoRemocao,
+  };
 }
 
 /**
@@ -173,6 +189,12 @@ export async function executar(db: SupabaseClient, chat_id: number, plano: Plano
   };
   let imagens = 0;
   const cabe = () => imagens < MAX_IMAGENS_POR_RODADA && Date.now() - inicio < ORCAMENTO_MS;
+
+  // 0. Preencher o link do Instagram nos posts que ficaram sem ele (barato e sem risco).
+  for (const l of plano.semLink) {
+    const { error } = await db.from("posts").update({ permalink: l.permalink }).eq("id", l.id);
+    if (error) res.falhas.push(`Link ${l.id.slice(0, 8)}: ${error.message.slice(0, 60)}`);
+  }
 
   // 1. Remover o que sumiu do Instagram.
   for (const p of plano.remover) {
