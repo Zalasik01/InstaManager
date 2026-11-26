@@ -1,0 +1,18 @@
+---
+import Base from "@/layouts/Base.astro";
+---
+
+<Base
+  titulo="Página não encontrada | Polo 9n4"
+  descricao="A página que você procurou não existe ou mudou de lugar. Volte ao início do Polo 9n4."
+  caminho="/404"
+  robots="noindex,follow"
+  ogDescricao="A página não existe ou mudou de lugar."
+>
+  <p class="text-accent text-sm font-bold tracking-wide uppercase">Erro 404</p>
+  <h1 class="mt-2 text-3xl font-extrabold">Página não encontrada</h1>
+  <p class="text-muted mt-3">O endereço não existe ou mudou de lugar.</p>
+  <a href="/" class="bg-accent text-accent-fg mt-6 inline-block rounded-lg px-4 py-2 font-bold"
+    >Voltar ao início</a
+  >
+</Base>

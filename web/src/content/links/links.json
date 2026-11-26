@@ -1,0 +1,5 @@
+{
+  "_ajuda": "Como editar: dentro de \"itens\" cada peca e um bloco entre chaves { }, separado do proximo por virgula. Campos: \"titulo\" (nome da peca), \"url\" (link completo comecando com https://), \"categoria\" (ex.: Rodas, Som, Visual, Mecanica; vazio vai para Outros), \"loja\", \"descricao\", \"preco\" (texto livre, ex.: R$ 250), \"data\" (AAAA-MM-DD). Campo com \"\" (vazio) NAO aparece no site. Itens sem url valida (https:// ou http://) sao ignorados. Exemplo de um item: { \"titulo\": \"Jogo de rodas aro 17\", \"url\": \"https://loja.exemplo/produto\", \"categoria\": \"Rodas\", \"loja\": \"Nome da loja\", \"descricao\": \"\", \"preco\": \"R$ 1.890\", \"data\": \"2026-11-26\" }. Cuidado com virgulas e aspas: o arquivo precisa continuar sendo JSON valido.",
+  "atualizado_em": "2026-11-26",
+  "itens": []
+}

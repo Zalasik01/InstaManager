@@ -1,0 +1,10 @@
+---
+import { getEntry, render } from "astro:content";
+import Legal from "@/layouts/Legal.astro";
+
+const entrada = await getEntry("legal", "termos");
+if (!entrada) throw new Error("Falta src/content/legal/termos.md");
+const { Content } = await render(entrada);
+---
+
+<Legal {...entrada.data} caminho="/termos"><Content /></Legal>

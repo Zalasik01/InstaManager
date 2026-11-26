@@ -1,0 +1,6 @@
+/* SITE */
+Nome: Polo 9n4
+URL: https://polo9n.com.br
+Idioma: pt-BR
+Instagram: https://www.instagram.com/polo_9n4_12/
+Tecnologia: Astro, React, Tailwind CSS e TypeScript, hospedado na Cloudflare (Workers)

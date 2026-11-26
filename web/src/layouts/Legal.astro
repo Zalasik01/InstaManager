@@ -1,0 +1,29 @@
+---
+/** Layout das páginas jurídicas (conteúdo vem de src/content/legal/*.md). */
+import Base from "@/layouts/Base.astro";
+import { formatarDataCurta } from "@/lib/format";
+
+interface Props {
+  titulo: string;
+  descricao: string;
+  ogDescricao: string;
+  caminho: string;
+  atualizado: string;
+}
+
+const { titulo, descricao, ogDescricao, caminho, atualizado } = Astro.props;
+---
+
+<Base
+  titulo={`${titulo} | Polo 9n4`}
+  descricao={descricao}
+  caminho={caminho}
+  ogTitulo={`${titulo} | Polo 9n4`}
+  ogDescricao={ogDescricao}
+>
+  <article class="prose-doc">
+    <h1>{titulo}</h1>
+    <p class="atualizado">Última atualização: {formatarDataCurta(atualizado)}</p>
+    <slot />
+  </article>
+</Base>

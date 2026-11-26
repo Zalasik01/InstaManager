@@ -1,0 +1,24 @@
+{
+  "_ajuda": "Como editar: preencha so o que for verdade. Campo com \"\" (vazio) NAO aparece no site. Para mostrar um campo, escreva o valor entre aspas, ex.: \"motor\": \"1.6 8v Flex\". Em \"modificacoes\" e \"extras\" cada item e um texto dentro da lista; deixe a lista vazia ([]) para esconder a secao. O site agrupa sozinho em Destaques (ano, motor, cambio, cor), Mecanica, Rodas e pneus, Visual, Som e Mais; versao igual a geracao nao aparece. \"atualizado_em\" (AAAA-MM-DD) mostra a data no rodape da aba; deixe \"\" para esconder. \"desde\" e o ano em que o perfil comecou. \"fotos\" e o numero de fotos do carro (deixe \"\" para esconder o contador). Cuidado com virgulas e aspas: o arquivo precisa continuar sendo JSON valido.",
+  "atualizado_em": "2026-11-26",
+  "desde": "",
+  "fotos": "",
+  "ficha": {
+    "modelo": "Volkswagen Polo",
+    "ano": "2012",
+    "geracao": "9n4",
+    "cor": "Branco",
+    "motor": "1.6 8v Flex EA111",
+    "cambio": "Manual 5 marchas",
+    "versao": "9n4",
+    "rodas": "",
+    "pneus": "",
+    "suspensao": "",
+    "freios": "Original",
+    "escape": "Coletor 4x1 + Intermediário + Ponteira 2.5\"",
+    "som": "Trio Champion 3",
+    "quilometragem": "160k"
+  },
+  "modificacoes": ["Película G5"],
+  "extras": []
+}
