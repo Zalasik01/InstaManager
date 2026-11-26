@@ -15,6 +15,7 @@
 
 import type { SupabaseClient } from "npm:@supabase/supabase-js@2";
 import { enviarParaDrive, moverParaLixeira } from "./drive.ts";
+import { enviarParaGaleria, removerDaGaleria } from "./galeria.ts";
 
 const GRAPH = "https://graph.facebook.com/v23.0";
 const MAX_MIDIAS = 500;
@@ -41,15 +42,19 @@ type PostBanco = {
   agendado_para: string | null;
   atualizado_em: string;
   drive_file_ids: string[];
+  galeria_paths: string[];
   origem: string;
 };
+
+// Posts importados que já estão no banco mas faltam no Drive e/ou na galeria do site.
+type SemImagem = { m: Midia; drive: boolean; galeria: boolean };
 
 export type Plano = {
   noInstagram: number;
   noBanco: number;
   importar: Midia[];
   remover: PostBanco[];
-  semImagem: Midia[]; // posts importados que já estão no banco mas sem imagem no Drive
+  semImagem: SemImagem[];
   driveAtivo: boolean;
   avisoRemocao?: string; // motivo de as remoções terem sido canceladas
 };
@@ -103,7 +108,7 @@ export async function planejar(db: SupabaseClient): Promise<Plano> {
   const ids = new Set(midias.map((m) => m.id));
 
   const { data, error } = await db.from("posts")
-    .select("id,ig_media_id,legenda,agendado_para,atualizado_em,drive_file_ids,origem")
+    .select("id,ig_media_id,legenda,agendado_para,atualizado_em,drive_file_ids,galeria_paths,origem")
     .eq("status", "publicado").not("ig_media_id", "is", null);
   if (error) throw new Error(`Banco: ${error.message}`);
   const banco = (data ?? []) as PostBanco[];
@@ -124,17 +129,29 @@ export async function planejar(db: SupabaseClient): Promise<Plano> {
   }
 
   const porId = new Map(midias.map((m) => [m.id, m]));
-  const semImagem = driveAtivo()
-    ? banco.filter((p) => p.origem === "importado" && !p.drive_file_ids?.length && porId.has(p.ig_media_id))
-      .map((p) => porId.get(p.ig_media_id)!)
-    : [];
+  const semImagem: SemImagem[] = banco
+    .filter((p) => p.origem === "importado" && porId.has(p.ig_media_id))
+    .map((p) => ({
+      m: porId.get(p.ig_media_id)!,
+      drive: driveAtivo() && !p.drive_file_ids?.length,
+      galeria: !p.galeria_paths?.length,
+    }))
+    .filter((x) => x.drive || x.galeria);
 
   return { noInstagram: midias.length, noBanco: banco.length, importar, remover, semImagem, driveAtivo: driveAtivo(), avisoRemocao };
 }
 
-/** Baixa as imagens do post e arquiva no Drive (AAAA/MM/DD da data do post). Devolve os ids do Drive. */
-async function arquivarImagens(m: Midia): Promise<string[]> {
-  const ids: string[] = [];
+/**
+ * Baixa as imagens do post uma vez e guarda onde faltar: Drive (AAAA/MM/DD da data do post) e/ou
+ * galeria pública do site. Devolve os ids do Drive e os caminhos da galeria (vazios se não foi pedido).
+ */
+async function guardarImagens(
+  db: SupabaseClient,
+  m: Midia,
+  destino: { drive: boolean; galeria: boolean },
+): Promise<{ driveIds: string[]; galeria: string[] }> {
+  const driveIds: string[] = [];
+  const galeria: string[] = [];
   const data = new Date(m.timestamp);
   const urls = imagensDe(m);
   for (let i = 0; i < urls.length; i++) {
@@ -142,9 +159,11 @@ async function arquivarImagens(m: Midia): Promise<string[]> {
     if (!r.ok) throw new Error(`download da imagem falhou (${r.status})`);
     const bytes = new Uint8Array(await r.arrayBuffer());
     if (bytes[0] !== 0xff || bytes[1] !== 0xd8) throw new Error("a imagem não é JPEG");
-    ids.push(await enviarParaDrive(bytes, `${m.id}_${i + 1}.jpg`, data));
+    const nome = `${m.id}_${i + 1}.jpg`;
+    if (destino.galeria) galeria.push(await enviarParaGaleria(db, bytes, nome, data));
+    if (destino.drive) driveIds.push(await enviarParaDrive(bytes, nome, data));
   }
-  return ids;
+  return { driveIds, galeria };
 }
 
 export async function executar(db: SupabaseClient, chat_id: number, plano: Plano): Promise<Resultado> {
@@ -167,6 +186,8 @@ export async function executar(db: SupabaseClient, chat_id: number, plano: Plano
         }
       }
     }
+    // A cópia pública do site também sai (o post não existe mais no Instagram).
+    await removerDaGaleria(db, p.galeria_paths ?? []);
     // As métricas saem junto (on delete cascade).
     const { error } = await db.from("posts").delete().eq("id", p.id);
     if (error) res.falhas.push(`Banco: ${error.message.slice(0, 80)}`);
@@ -193,31 +214,37 @@ export async function executar(db: SupabaseClient, chat_id: number, plano: Plano
     res.importados++;
     await db.rpc("registrar_usos_hashtags", { p_post_id: data.id, p_quando: m.timestamp });
 
-    if (plano.driveAtivo && cabe()) {
+    if (cabe()) {
       try {
-        const driveIds = await arquivarImagens(m);
-        imagens += driveIds.length;
-        res.imagensArquivadas += driveIds.length;
-        await db.from("posts").update({ drive_file_ids: driveIds }).eq("id", data.id);
+        const g = await guardarImagens(db, m, { drive: plano.driveAtivo, galeria: true });
+        imagens += g.galeria.length;
+        res.imagensArquivadas += g.galeria.length;
+        await db.from("posts").update({
+          galeria_paths: g.galeria,
+          ...(plano.driveAtivo ? { drive_file_ids: g.driveIds } : {}),
+        }).eq("id", data.id);
       } catch (e) {
         res.falhas.push(`Imagem ${m.id}: ${(e as Error).message.slice(0, 80)}`);
       }
-    } else if (plano.driveAtivo) {
+    } else {
       res.restantes += imagensDe(m).length;
     }
   }
 
   // 3. Posts importados antes que ainda estão sem imagem no Drive.
-  for (const m of plano.semImagem) {
+  for (const { m, drive, galeria } of plano.semImagem) {
     if (!cabe()) {
       res.restantes += imagensDe(m).length;
       continue;
     }
     try {
-      const driveIds = await arquivarImagens(m);
-      imagens += driveIds.length;
-      res.imagensArquivadas += driveIds.length;
-      await db.from("posts").update({ drive_file_ids: driveIds }).eq("ig_media_id", m.id);
+      const g = await guardarImagens(db, m, { drive, galeria });
+      imagens += imagensDe(m).length;
+      res.imagensArquivadas += imagensDe(m).length;
+      await db.from("posts").update({
+        ...(drive ? { drive_file_ids: g.driveIds } : {}),
+        ...(galeria ? { galeria_paths: g.galeria } : {}),
+      }).eq("ig_media_id", m.id);
     } catch (e) {
       res.falhas.push(`Imagem ${m.id}: ${(e as Error).message.slice(0, 80)}`);
     }

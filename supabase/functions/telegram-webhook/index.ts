@@ -622,9 +622,7 @@ async function tratarMenu(cb: any, sub: string) {
         ...p.remover.slice(0, 6).map((x) =>
           `   - ${formatarHorario(new Date(x.agendado_para ?? x.atualizado_em))}: ${(x.legenda ?? "").split("\n")[0].slice(0, 40) || "(sem legenda)"}`
         ),
-        p.driveAtivo
-          ? `• Imagens a arquivar no Drive: ${p.importar.length + p.semImagem.length} post(s)`
-          : "• Drive não configurado: as imagens não serão importadas.",
+        `• Imagens a guardar (galeria do site${p.driveAtivo ? " e Drive" : ""}): ${p.importar.length + p.semImagem.length} post(s)`,
       ];
       if (p.avisoRemocao) linhas.push("", `Atenção: ${p.avisoRemocao}`);
       if (p.remover.length) {
