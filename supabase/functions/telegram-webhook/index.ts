@@ -364,6 +364,7 @@ async function anexarFotoAoAlbum(
 async function tratarBotao(cb: any) {
   const chat_id: number = cb.message.chat.id;
   const [acao, postId, extra] = String(cb.data).split(":");
+  trace("botao", String(cb.data), chat_id);
   // Cancelar responde com um aviso rápido na tela (sem deixar mensagem no chat).
   await tg("answerCallbackQuery", {
     callback_query_id: cb.id,
@@ -554,8 +555,8 @@ const tecladoMenu = {
   inline_keyboard: [
     [{ text: "Status das integrações", callback_data: "menu:status" }],
     [
-      { text: "Posts agendados", callback_data: "menu:agendados" },
-      { text: "Posts com erro", callback_data: "menu:erros" },
+      { text: "Agendados", callback_data: "menu:agendados" },
+      { text: "Com erro", callback_data: "menu:erros" },
     ],
     [{ text: "Hashtags", callback_data: "menu:hashtags" }, { text: "Limpar chat", callback_data: "menu:limpar" }],
     [{ text: "Sincronizar com o Instagram", callback_data: "menu:sync" }],
@@ -565,9 +566,17 @@ const tecladoMenu = {
 
 const voltar = [{ text: "Voltar", callback_data: "menu:inicio" }];
 
+// A largura dos botões no Telegram é a largura da mensagem. Com um texto curto ("Menu:") a bolha fica
+// estreita e os botões ficam apertados; a linha de espaços em braille (U+2800, invisível) alarga a bolha.
+const TEXTO_MENU = `Menu do InstaManager\nEscolha uma opção:\n${"\u2800".repeat(36)}`;
+
 async function editar(chat_id: number, message_id: number, text: string, reply_markup?: unknown) {
-  await tg("editMessageText", { chat_id, message_id, text, ...(reply_markup ? { reply_markup } : {}) })
-    .catch(() => {});
+  const r = await tg("editMessageText", { chat_id, message_id, text, ...(reply_markup ? { reply_markup } : {}) })
+    .catch((e) => ({ ok: false, description: `falha de rede: ${(e as Error).message}` }));
+  // "message is not modified" é inofensivo; qualquer outro erro vai para o registro de eventos.
+  if (!r.ok && !String(r.description).includes("not modified")) {
+    trace("editar_falhou", `${r.description} | msg=${message_id}`, chat_id);
+  }
 }
 
 // Grava na tabela logs o resultado das integrações, os últimos eventos e os posts com problema.
@@ -595,7 +604,7 @@ async function tratarMenu(cb: any, sub: string) {
     await apagarMensagens(chat_id, [message_id]);
     return;
   }
-  if (sub === "inicio") return editar(chat_id, message_id, "Menu:", tecladoMenu);
+  if (sub === "inicio") return editar(chat_id, message_id, TEXTO_MENU, tecladoMenu);
   if (sub === "limpar") {
     // Mesmo efeito do /limpar: descarta rascunhos pendentes e apaga o chat até esta mensagem.
     await db.from("posts").update({
@@ -855,7 +864,7 @@ async function processarUpdate(update: any) {
       // ignora em silêncio
     } else if (/^(\/menu|menu)$/i.test(msg?.text?.trim() ?? "")) {
       // Vale para o comando /menu e para o botão fixo "Menu".
-      await enviar(chat_id!, "Menu:", { reply_markup: tecladoMenu });
+      await enviar(chat_id!, TEXTO_MENU, { reply_markup: tecladoMenu });
     } else if (/^\/hashtags/i.test(msg?.text?.trim() ?? "")) {
       await mostrarHashtags(chat_id!);
     } else if (/^criar postagem$/i.test(msg?.text?.trim() ?? "")) {

@@ -28,7 +28,11 @@ class ErroGraph extends Error {
 }
 
 // Conjuntos de métricas, do mais completo ao mais enxuto (tipos de mídia aceitam métricas diferentes).
+// `views` (visualizações) é a métrica nova que substitui impressions/plays; vem primeiro e,
+// se algum tipo de mídia recusar, os conjuntos seguintes tiram `views` e seguem sem ela.
 const CONJUNTOS = [
+  ["reach", "views", "likes", "comments", "saved", "shares", "total_interactions"],
+  ["reach", "views", "likes", "comments", "saved", "shares"],
   ["reach", "likes", "comments", "saved", "shares", "total_interactions"],
   ["reach", "likes", "comments", "saved", "shares"],
   ["reach", "saved", "shares"],
@@ -169,6 +173,7 @@ Deno.serve(async (req) => {
         post_id: p.id,
         alcance: m.reach ?? null,
         impressoes: null, // imagem/carrossel não aceitam impressions nas versões novas
+        visualizacoes: m.views ?? null,
         curtidas: m.likes ?? null,
         comentarios: m.comments ?? null,
         salvamentos: m.saved ?? null,

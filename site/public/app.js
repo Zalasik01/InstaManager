@@ -89,6 +89,12 @@
   }
 
   /* ---------- API ---------- */
+  function buscar0(limite) {
+    if (DEMO) return demoPosts(0, limite);
+    return fetch('/api/posts?limite=' + limite, { headers: { Accept: 'application/json' } })
+      .then(function (r) { if (!r.ok) throw new Error(); return r.json(); });
+  }
+
   function buscar(offset) {
     if (DEMO) return demoPosts(offset, LIMITE);
     return fetch('/api/posts?limite=' + LIMITE + '&offset=' + offset, { headers: { Accept: 'application/json' } })
@@ -377,54 +383,143 @@
     modelo: 'Modelo', ano: 'Ano', geracao: 'Geração', cor: 'Cor', versao: 'Versão', motor: 'Motor', cambio: 'Câmbio',
     rodas: 'Rodas', pneus: 'Pneus', suspensao: 'Suspensão', freios: 'Freios', escape: 'Escape', som: 'Som', quilometragem: 'Quilometragem'
   };
-  var ORDEM = ['modelo', 'ano', 'geracao', 'cor', 'versao', 'motor', 'cambio', 'rodas', 'pneus', 'suspensao', 'freios', 'escape', 'som', 'quilometragem'];
+  var DESTAQUES = ['ano', 'motor', 'cambio', 'cor', 'versao'];
+  var SECOES = [
+    { titulo: 'Mecânica', chaves: ['motor', 'cambio', 'suspensao', 'freios', 'escape'] },
+    { titulo: 'Rodas e pneus', chaves: ['rodas', 'pneus'] },
+    { titulo: 'Visual', chaves: ['cor'] },
+    { titulo: 'Som', chaves: ['som'] }
+  ];
+  var CONHECIDAS = ['modelo', 'ano', 'geracao', 'cor', 'versao', 'motor', 'cambio', 'rodas', 'pneus', 'suspensao', 'freios', 'escape', 'som', 'quilometragem'];
 
   function cheio(v) { return typeof v === 'string' ? v.trim() !== '' : (v != null && v !== ''); }
+  function rotulo(k) { return ROTULOS[k] || k.charAt(0).toUpperCase() + k.slice(1).replace(/_/g, ' '); }
 
-  function secaoLista(raiz, titulo, itens) {
-    var lista = (Array.isArray(itens) ? itens : []).filter(cheio);
-    if (!lista.length) return;
-    raiz.appendChild(el('h3', null, titulo));
-    var ul = el('ul', 'mods');
-    lista.forEach(function (m) { ul.appendChild(el('li', null, String(m))); });
-    raiz.appendChild(ul);
+  function itemDl(dl, k, v) {
+    var row = el('div');
+    row.appendChild(el('dt', null, rotulo(k)));
+    row.appendChild(el('dd', null, String(v)));
+    dl.appendChild(row);
   }
 
-  function montarCarro(c) {
+  function secao(raiz, titulo, filho) {
+    var s = el('section', 'car-sec');
+    var id = 'carro-s-' + raiz.childNodes.length;
+    var h = el('h2', null, titulo);
+    h.id = id;
+    s.setAttribute('aria-labelledby', id);
+    s.appendChild(h);
+    s.appendChild(filho);
+    raiz.appendChild(s);
+  }
+
+  function chips(itens) {
+    var ul = el('ul', 'car-chips');
+    itens.forEach(function (m) { ul.appendChild(el('li', null, String(m))); });
+    return ul;
+  }
+
+  function lista(itens) { return (Array.isArray(itens) ? itens : []).filter(cheio); }
+
+  function dataCurta(iso) {
+    var m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(String(iso || '').trim());
+    if (!m) return null;
+    var d = new Date(Number(m[1]), Number(m[2]) - 1, Number(m[3]));
+    if (isNaN(d.getTime())) return null;
+    return { txt: d.toLocaleDateString('pt-BR', { day: 'numeric', month: 'long', year: 'numeric' }), iso: m[0] };
+  }
+
+  function montarHero(raiz, f, fotoUrl) {
+    var fig = el('figure', 'car-hero');
+    var im = el('img');
+    var fallback = '/img/perfil.png';
+    im.width = 1600; im.height = 1000;
+    im.alt = 'Foto do ' + (cheio(f.modelo) ? f.modelo : 'carro');
+    im.decoding = 'async';
+    im.addEventListener('error', function () { if (im.getAttribute('src') !== fallback) im.src = fallback; });
+    im.src = fotoUrl || fallback;
+    fig.appendChild(im);
+    raiz.appendChild(fig);
+
+    var partes = cheio(f.modelo) ? String(f.modelo).trim().split(/\s+/) : [];
+    var marca = partes.length > 1 ? partes.shift() : '';
+    var nome = partes.join(' ');
+    var linha = [marca, f.ano, f.geracao].filter(cheio).join(' \u00b7 ');
+    if (!nome && !linha) return;
+    var cab = el('header', 'car-head');
+    if (linha) cab.appendChild(el('p', 'car-eyebrow', linha));
+    cab.appendChild(el('h2', 'car-name', nome || 'O carro'));
+    raiz.appendChild(cab);
+  }
+
+  function montarCarro(c, fotoUrl) {
     var raiz = $('carro');
     raiz.textContent = '';
     var f = c.ficha || {};
-    var chaves = ORDEM.concat(Object.keys(f).filter(function (k) { return ORDEM.indexOf(k) < 0 && k.charAt(0) !== '_'; }));
-    var linhas = chaves.filter(function (k) { return cheio(f[k]); });
-    var nome = [f.modelo, f.ano, f.geracao].filter(cheio).join(' ');
-    raiz.appendChild(el('h2', null, nome || 'O carro'));
-    if (cheio(f.cor)) raiz.appendChild(el('p', 'sub', f.cor));
-    if (linhas.length) {
-      raiz.appendChild(el('h3', null, 'Ficha técnica'));
-      var dl = el('dl', 'spec');
-      linhas.forEach(function (k) {
-        var row = el('div');
-        row.appendChild(el('dt', null, ROTULOS[k] || k.charAt(0).toUpperCase() + k.slice(1)));
-        row.appendChild(el('dd', null, String(f[k])));
-        dl.appendChild(row);
-      });
+    var usadas = { modelo: 1, geracao: 1 };
+
+    montarHero(raiz, f, fotoUrl);
+
+    var ver = cheio(f.versao) && cheio(f.geracao) && String(f.versao).trim().toLowerCase() === String(f.geracao).trim().toLowerCase();
+    if (ver) usadas.versao = 1;
+    var dest = DESTAQUES.filter(function (k) { return cheio(f[k]) && !usadas[k]; }).slice(0, 4);
+    if (dest.length) {
+      var dl = el('dl', 'car-hl');
+      dest.forEach(function (k) { usadas[k] = 1; itemDl(dl, k, f[k]); });
       raiz.appendChild(dl);
     }
-    secaoLista(raiz, 'Modificações', c.modificacoes);
-    secaoLista(raiz, 'Extras', c.extras);
+
+    SECOES.forEach(function (s) {
+      var ks = s.chaves.filter(function (k) { return cheio(f[k]) && !usadas[k]; });
+      if (!ks.length) return;
+      var d = el('dl', 'car-list');
+      ks.forEach(function (k) { usadas[k] = 1; itemDl(d, k, f[k]); });
+      secao(raiz, s.titulo, d);
+    });
+
+    var mods = lista(c.modificacoes);
+    if (mods.length) secao(raiz, 'Modificações', chips(mods));
+
+    var resto = CONHECIDAS.concat(Object.keys(f)).filter(function (k, i, a) { return a.indexOf(k) === i && k.charAt(0) !== '_' && !usadas[k] && cheio(f[k]); });
+    var extras = lista(c.extras);
+    if (resto.length) {
+      var dm = el('dl', 'car-list');
+      resto.forEach(function (k) { itemDl(dm, k, f[k]); });
+      secao(raiz, 'Mais', dm);
+    }
+    if (extras.length) secao(raiz, resto.length ? 'Extras' : 'Mais', chips(extras));
+
+    var dt = dataCurta(c.atualizado_em);
+    if (dt) {
+      var p = el('p', 'car-upd', 'Atualizado em ');
+      var t = el('time', null, dt.txt);
+      t.setAttribute('datetime', dt.iso);
+      p.appendChild(t);
+      raiz.appendChild(p);
+    }
+
     var st = function (id, v) { if (cheio(v)) { $(id).textContent = String(v); $(id + '-li').hidden = false; } };
     st('st-desde', c.desde);
     st('st-fotos', c.fotos);
   }
 
+  function fotoDoCarro() {
+    return buscar0(1).then(function (j) {
+      var p = j && j.posts && j.posts[0];
+      var u = p && Array.isArray(p.imagens) ? p.imagens[0] : '';
+      return typeof u === 'string' && u ? u : '';
+    }).catch(function () { return ''; });
+  }
+
   function carregarCarro() {
-    fetch('/carro.json', { headers: { Accept: 'application/json' } })
-      .then(function (r) { if (!r.ok) throw new Error(); return r.json(); })
-      .then(montarCarro)
+    var ficha = fetch('/carro.json', { headers: { Accept: 'application/json' } })
+      .then(function (r) { if (!r.ok) throw new Error(); return r.json(); });
+    var foto = fotoDoCarro();
+    ficha.then(function (c) { return foto.then(function (u) { montarCarro(c, u); }); })
       .catch(function () {
         var raiz = $('carro');
         raiz.textContent = '';
-        raiz.appendChild(el('p', 'sub', 'A ficha do carro não pôde ser carregada agora.'));
+        raiz.appendChild(el('p', 'car-erro', 'A ficha do carro não pôde ser carregada agora.'));
       });
   }
 

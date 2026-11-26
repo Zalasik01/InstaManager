@@ -18,6 +18,9 @@ type PostRpc = {
   publicado_em: string;
   permalink: string | null;
   galeria_paths: string[];
+  visualizacoes: number | null;
+  curtidas: number | null;
+  comentarios: number | null;
 };
 
 const json = (corpo: unknown, status = 200, cache = "no-store") =>
@@ -58,6 +61,9 @@ async function posts(url: URL, env: Env): Promise<Response> {
           legenda: p.legenda ?? "",
           publicado_em: p.publicado_em,
           permalink: p.permalink,
+          visualizacoes: p.visualizacoes,
+          curtidas: p.curtidas,
+          comentarios: p.comentarios,
           imagens: p.galeria_paths.map((c) => base + c.split("/").map(encodeURIComponent).join("/")),
         })),
       },
