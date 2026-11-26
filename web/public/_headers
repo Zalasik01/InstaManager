@@ -1,0 +1,43 @@
+# Cabeçalhos de segurança em todas as respostas dos arquivos estáticos.
+# A CSP de scripts e estilos NAO fica aqui: o Astro a gera por página (meta http-equiv, com hashes,
+# sem unsafe-inline). Esta é a parte que só vale como cabeçalho (frame-ancestors) mais um reforço
+# dos demais destinos. As duas políticas valem juntas (vence a mais restritiva).
+/*
+  X-Content-Type-Options: nosniff
+  Referrer-Policy: strict-origin-when-cross-origin
+  Permissions-Policy: camera=(), microphone=(), geolocation=(), interest-cohort=()
+  X-Frame-Options: DENY
+  Strict-Transport-Security: max-age=31536000; includeSubDomains; preload
+  Cross-Origin-Opener-Policy: same-origin
+  Content-Security-Policy: img-src 'self' data: https://crzmyemggpgjcrwwuwka.supabase.co; connect-src 'self' https://crzmyemggpgjcrwwuwka.supabase.co; manifest-src 'self'; worker-src 'self'; object-src 'none'; frame-ancestors 'none'; base-uri 'self'; form-action 'none'
+
+# Cache: regras por caminho (o Cloudflare junta valores repetidos do mesmo cabeçalho, então nada de curinga).
+/
+  Cache-Control: public, max-age=0, must-revalidate
+/privacidade
+  Cache-Control: public, max-age=0, must-revalidate
+/termos
+  Cache-Control: public, max-age=0, must-revalidate
+/offline
+  Cache-Control: public, max-age=0, must-revalidate
+/404
+  Cache-Control: public, max-age=0, must-revalidate
+/sitemap-index.xml
+  Cache-Control: public, max-age=0, must-revalidate
+/sitemap-0.xml
+  Cache-Control: public, max-age=0, must-revalidate
+/robots.txt
+  Cache-Control: public, max-age=3600
+/sw.js
+  Cache-Control: no-cache
+/version.json
+  Cache-Control: no-store
+/manifest.webmanifest
+  Content-Type: application/manifest+json
+  Cache-Control: public, max-age=0, must-revalidate
+/_astro/*
+  Cache-Control: public, max-age=31536000, immutable
+/img/*
+  Cache-Control: public, max-age=86400, stale-while-revalidate=604800
+/favicon.svg
+  Cache-Control: public, max-age=86400

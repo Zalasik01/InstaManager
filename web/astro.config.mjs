@@ -3,7 +3,7 @@ import cloudflare from "@astrojs/cloudflare";
 import react from "@astrojs/react";
 import sitemap from "@astrojs/sitemap";
 import tailwindcss from "@tailwindcss/vite";
-import AstroPWA from "@vite-pwa/astro";
+import { AstroPWAIntegration } from "@vite-pwa/astro";
 import { defineConfig } from "astro/config";
 
 import { execSync } from "node:child_process";
@@ -31,7 +31,7 @@ export default defineConfig({
   integrations: [
     react(),
     sitemap({ filter: (page) => !/\/(404|offline)\/?$/.test(page) }),
-    AstroPWA({
+    AstroPWAIntegration({
       registerType: "autoUpdate",
       strategies: "injectManifest",
       srcDir: "src",
