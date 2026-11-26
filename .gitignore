@@ -3,3 +3,7 @@ node_modules/
 .env.*
 supabase/.temp/
 supabase/.branches/
+
+# Cache local do Cloudflare Wrangler (traz o ID da conta)
+site/.wrangler/
+.wrangler/
