@@ -477,7 +477,6 @@
 
   /* ---------- PWA: service worker e instalação ---------- */
   var promptInstalar = null;
-  var recarregarAoTrocar = false;
 
   function instalado() {
     var mm = window.matchMedia;
@@ -487,36 +486,65 @@
   function guardado(chave) { try { return localStorage.getItem(chave); } catch (e) { return null; } }
   function guardar(chave, v) { try { localStorage.setItem(chave, v); } catch (e) { /* sem storage */ } }
 
-  function avisoUpdate(reg) {
-    var box = $('aviso-update');
-    box.hidden = false;
-    $('aviso-update-ok').onclick = function () {
-      recarregarAoTrocar = true;
-      if (reg.waiting) reg.waiting.postMessage({ type: 'SKIP_WAITING' }); else location.reload();
-    };
+  /* ---------- atualização automática ----------
+     Toda publicação gera uma versão nova (o Worker injeta o id da versão no HTML e no sw.js).
+     O site confere a versão ao abrir, ao voltar para o app, a cada 10 minutos e ao reconectar:
+     se mudou, apaga os caches do app e recarrega, para todo mundo ficar na versão atual.
+     Se um visualizador estiver aberto, espera fechar (não interrompe quem está vendo um post). */
+  var versaoCarregada = (document.querySelector('meta[name="app-versao"]') || {}).content || '';
+  var atualizando = false;
+
+  function recarregarLimpo() {
+    if (atualizando) return;
+    if (document.querySelector('dialog[open]')) { setTimeout(recarregarLimpo, 4000); return; }
+    atualizando = true;
+    var limpar = ('caches' in window)
+      ? caches.keys().then(function (ks) {
+        return Promise.all(ks.filter(function (k) { return k.indexOf('polo9n-') === 0; }).map(function (k) { return caches.delete(k); }));
+      })
+      : Promise.resolve();
+    limpar.catch(function () { /* recarrega mesmo assim */ }).then(function () { location.reload(); });
   }
+
+  function checarVersao() {
+    if (!versaoCarregada || DEMO) return;
+    fetch('/version.json', { cache: 'no-store' })
+      .then(function (r) { return r.ok ? r.json() : null; })
+      .then(function (j) {
+        if (!j || !j.versao || j.versao === versaoCarregada) return;
+        // Trava contra laço: tenta no máximo uma vez por versão nova em cada sessão.
+        if (guardadoSessao('app-versao-tentada') === j.versao) return;
+        guardarSessao('app-versao-tentada', j.versao);
+        if ('serviceWorker' in navigator) navigator.serviceWorker.getRegistration().then(function (r) { if (r) r.update().catch(function () {}); });
+        recarregarLimpo();
+      })
+      .catch(function () { /* sem rede: tenta de novo na próxima checagem */ });
+  }
+
+  function guardadoSessao(chave) { try { return sessionStorage.getItem(chave); } catch (e) { return null; } }
+  function guardarSessao(chave, v) { try { sessionStorage.setItem(chave, v); } catch (e) { /* sem storage */ } }
 
   function registrarSW() {
     if (!('serviceWorker' in navigator)) return;
     var seguro = location.protocol === 'https:' || location.hostname === 'localhost' || location.hostname === '127.0.0.1';
     if (!seguro) return;
+    // Só recarrega na troca de service worker se a página já tinha um (na 1ª instalação não há o que atualizar).
+    var tinhaControlador = !!navigator.serviceWorker.controller;
     navigator.serviceWorker.addEventListener('controllerchange', function () {
-      if (recarregarAoTrocar) location.reload();
+      if (tinhaControlador) recarregarLimpo();
     });
     window.addEventListener('load', function () {
       navigator.serviceWorker.register('/sw.js').then(function (reg) {
-        if (reg.waiting && navigator.serviceWorker.controller) avisoUpdate(reg);
-        reg.addEventListener('updatefound', function () {
-          var novo = reg.installing;
-          if (!novo) return;
-          novo.addEventListener('statechange', function () {
-            if (novo.state === 'installed' && navigator.serviceWorker.controller) avisoUpdate(reg);
-          });
-        });
-        document.addEventListener('visibilitychange', function () {
-          if (document.visibilityState === 'visible') reg.update().catch(function () {});
-        });
+        reg.update().catch(function () {});
       }).catch(function () { /* site funciona sem SW */ });
+      setTimeout(checarVersao, 4000);
+      setInterval(checarVersao, 10 * 60 * 1000);
+      window.addEventListener('online', checarVersao);
+      document.addEventListener('visibilitychange', function () {
+        if (document.visibilityState !== 'visible') return;
+        checarVersao();
+        navigator.serviceWorker.getRegistration().then(function (r) { if (r) r.update().catch(function () {}); });
+      });
     });
   }
 

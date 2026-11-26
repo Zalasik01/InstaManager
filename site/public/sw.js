@@ -1,7 +1,8 @@
 'use strict';
 
-// Mude VERSAO a cada publicação que altere o shell para renovar os caches.
-const VERSAO = 'v7';
+// VERSAO é preenchida pelo Worker a cada publicação (id da versão do Cloudflare). Como o arquivo muda a
+// cada deploy, o navegador instala o service worker novo sozinho e os caches antigos são apagados.
+const VERSAO = '__APP_VERSION__';
 const CACHE_SHELL = 'polo9n-shell-' + VERSAO;
 const CACHE_API = 'polo9n-api-' + VERSAO;
 const CACHE_IMG = 'polo9n-img-' + VERSAO;
@@ -39,7 +40,8 @@ self.addEventListener('install', function (event) {
       }));
     })
   );
-  // Sem skipWaiting aqui: o site avisa o usuário e manda SKIP_WAITING.
+  // Assume na hora: a versão nova vale para todos sem esperar fechar as abas.
+  self.skipWaiting();
 });
 
 self.addEventListener('activate', function (event) {

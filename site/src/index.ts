@@ -8,6 +8,8 @@
 
 interface Env {
   ASSETS: { fetch(request: Request): Promise<Response> };
+  // Preenchido pelo Cloudflare: cada deploy tem um id novo (vale também para deploys automáticos pelo GitHub).
+  CF_VERSION_METADATA?: { id: string; tag?: string; timestamp?: string };
   SUPABASE_URL: string;
   SUPABASE_PUBLISHABLE_KEY: string;
 }
@@ -95,6 +97,46 @@ async function perfil(env: Env): Promise<Response> {
   }
 }
 
+const versaoDoApp = (env: Env) => (env.CF_VERSION_METADATA?.id ?? "dev").slice(0, 8);
+
+/**
+ * Arquivos estáticos. O sw.js e as páginas HTML levam o id da versão do deploy:
+ * - sw.js: troca __APP_VERSION__ (o arquivo muda a cada deploy, então todo navegador instala o novo);
+ * - HTML: injeta <meta name="app-versao">, que o site compara com /version.json para se atualizar sozinho.
+ * Como o corpo é reescrito, tira os cabeçalhos condicionais do pedido (nunca recebe 304 de um arquivo
+ * reescrito) e o ETag da resposta.
+ */
+async function estatico(request: Request, env: Env): Promise<Response> {
+  const url = new URL(request.url);
+  const ehSw = url.pathname === "/sw.js";
+  const querHtml = (request.headers.get("accept") ?? "").includes("text/html");
+
+  let pedido = request;
+  if (ehSw || querHtml) {
+    const h = new Headers(request.headers);
+    h.delete("if-none-match");
+    h.delete("if-modified-since");
+    pedido = new Request(request, { headers: h });
+  }
+  const r = await env.ASSETS.fetch(pedido);
+  if (r.status !== 200 || request.method !== "GET") return r;
+
+  const tipo = r.headers.get("content-type") ?? "";
+  if (!ehSw && !tipo.includes("text/html")) return r;
+
+  const versao = versaoDoApp(env);
+  let texto = await r.text();
+  texto = ehSw
+    ? texto.replaceAll("__APP_VERSION__", versao)
+    : texto.replace("</head>", `<meta name="app-versao" content="${versao}"></head>`);
+
+  const headers = new Headers(r.headers);
+  headers.delete("etag");
+  headers.delete("content-length");
+  headers.set("cache-control", "no-cache");
+  return new Response(texto, { status: 200, headers });
+}
+
 export default {
   async fetch(request: Request, env: Env): Promise<Response> {
     const url = new URL(request.url);
@@ -112,7 +154,9 @@ export default {
       ? await posts(url, env)
       : url.pathname === "/api/perfil"
       ? await perfil(env)
-      : await env.ASSETS.fetch(request);
+      : url.pathname === "/version.json"
+      ? json({ versao: versaoDoApp(env) }, 200, "no-store")
+      : await estatico(request, env);
 
     // O endereço provisório *.workers.dev não deve ser indexado (evita conteúdo duplicado com o domínio).
     if (url.hostname.endsWith(".workers.dev")) {
