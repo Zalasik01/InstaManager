@@ -1,7 +1,7 @@
 import * as Dialog from "@radix-ui/react-dialog";
 import useEmblaCarousel from "embla-carousel-react";
 import { ChevronLeft, ChevronRight, Maximize2, X } from "lucide-react";
-import { useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import ShareButton from "@/components/ShareButton";
 import ZoomViewer from "@/components/ZoomViewer";
 import { formatarData, formatarNumero } from "@/lib/format";
@@ -51,8 +51,24 @@ interface ConteudoProps {
 }
 
 function Conteudo({ post, temAnterior, temProximo, onAnterior, onProximo }: ConteudoProps) {
-  const [emblaRef, embla] = useEmblaCarousel({ loop: false });
+  // `duration` maior deixa o deslize mais suave; `dragFree: false` mantém o encaixe por imagem.
+  const [emblaRef, embla] = useEmblaCarousel({ loop: false, duration: 28 });
+  const [selecionada, setSelecionada] = useState(0);
   const [zoom, setZoom] = useState<string | null>(null);
+
+  const atualizarSelecionada = useCallback(() => {
+    if (embla) setSelecionada(embla.selectedScrollSnap());
+  }, [embla]);
+
+  useEffect(() => {
+    if (!embla) return;
+    atualizarSelecionada();
+    embla.on("select", atualizarSelecionada).on("reInit", atualizarSelecionada);
+    return () => {
+      embla.off("select", atualizarSelecionada).off("reInit", atualizarSelecionada);
+    };
+  }, [embla, atualizarSelecionada]);
+
   const { texto, tags } = separarLegenda(post.legenda);
 
   return (
@@ -68,15 +84,18 @@ function Conteudo({ post, temAnterior, temProximo, onAnterior, onProximo }: Cont
       </div>
 
       <div className="relative">
-        <div ref={emblaRef} className="overflow-hidden">
-          <div className="flex">
+        <div ref={emblaRef} className="cursor-grab overflow-hidden active:cursor-grabbing">
+          <div className="flex touch-pan-y">
             {post.imagens.map((src, i) => (
               <div key={src} className="min-w-0 flex-[0_0_100%]">
                 <img
                   crossOrigin="anonymous"
                   src={src}
                   alt={`Foto ${i + 1} de ${post.imagens.length}`}
-                  className="max-h-[60dvh] w-full object-contain"
+                  draggable={false}
+                  className={`max-h-[60dvh] w-full object-contain transition-all duration-500 ease-out ${
+                    i === selecionada ? "scale-100 opacity-100" : "scale-95 opacity-40"
+                  }`}
                 />
               </div>
             ))}
@@ -87,19 +106,40 @@ function Conteudo({ post, temAnterior, temProximo, onAnterior, onProximo }: Cont
             <button
               type="button"
               aria-label="Imagem anterior"
+              disabled={selecionada === 0}
               onClick={() => embla?.scrollPrev()}
-              className="absolute top-1/2 left-2 -translate-y-1/2 rounded-full bg-black/60 p-2"
+              className="absolute top-1/2 left-2 -translate-y-1/2 rounded-full bg-black/60 p-2 transition hover:scale-110 hover:bg-black/80 disabled:pointer-events-none disabled:opacity-0"
             >
               <ChevronLeft size={20} aria-hidden="true" />
             </button>
             <button
               type="button"
               aria-label="Próxima imagem"
+              disabled={selecionada === post.imagens.length - 1}
               onClick={() => embla?.scrollNext()}
-              className="absolute top-1/2 right-2 -translate-y-1/2 rounded-full bg-black/60 p-2"
+              className="absolute top-1/2 right-2 -translate-y-1/2 rounded-full bg-black/60 p-2 transition hover:scale-110 hover:bg-black/80 disabled:pointer-events-none disabled:opacity-0"
             >
               <ChevronRight size={20} aria-hidden="true" />
             </button>
+            <div
+              role="tablist"
+              aria-label="Fotos do post"
+              className="absolute bottom-3 left-1/2 flex -translate-x-1/2 items-center gap-1.5 rounded-full bg-black/40 px-2 py-1.5 backdrop-blur-sm"
+            >
+              {post.imagens.map((src, i) => (
+                <button
+                  key={src}
+                  type="button"
+                  role="tab"
+                  aria-selected={i === selecionada}
+                  aria-label={`Ir para a foto ${i + 1}`}
+                  onClick={() => embla?.scrollTo(i)}
+                  className={`h-1.5 rounded-full bg-white transition-all duration-300 ${
+                    i === selecionada ? "w-4 opacity-100" : "w-1.5 opacity-50 hover:opacity-80"
+                  }`}
+                />
+              ))}
+            </div>
           </>
         ) : null}
       </div>
