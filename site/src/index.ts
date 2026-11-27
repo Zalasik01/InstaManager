@@ -23,6 +23,7 @@ type PostRpc = {
   visualizacoes: number | null;
   curtidas: number | null;
   comentarios: number | null;
+  video_path: string | null;
 };
 
 const json = (corpo: unknown, status = 200, cache = "no-store") =>
@@ -66,6 +67,8 @@ async function posts(url: URL, env: Env): Promise<Response> {
           visualizacoes: p.visualizacoes,
           curtidas: p.curtidas,
           comentarios: p.comentarios,
+          // Vídeo/Reel: URL do MP4 na galeria (o site toca com <video>); null para foto.
+          video: p.video_path ? base + p.video_path.split("/").map(encodeURIComponent).join("/") : null,
           imagens: p.galeria_paths.map((c) => base + c.split("/").map(encodeURIComponent).join("/")),
         })),
       },

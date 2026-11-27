@@ -94,6 +94,7 @@
     return s;
   }
   var OLHO = '<path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7S2 12 2 12z"/><circle cx="12" cy="12" r="3"/>';
+  var PLAY = '<path d="M8 5.5v13l11-6.5z" fill="currentColor"/>';
 
   /* ---------- demo (sem rede) ---------- */
   function svgDados(i, n) {
@@ -199,6 +200,7 @@
         b.appendChild(im);
       }
       if (imgs.length > 1) b.appendChild(svgIcone());
+      if (p.video) b.appendChild(icone(PLAY, 'multi')); // vídeo/Reel: ícone de play no canto
       if (vis != null) {
         b.classList.add('has-views');
         var sv = el('span', 'views');
@@ -221,7 +223,8 @@
       bs.type = 'button';
       bs.setAttribute('aria-label', 'Compartilhar este post');
       bs.addEventListener('click', function (e) { e.stopPropagation(); compartilharPost(idx); });
-      act.appendChild(bx); act.appendChild(bs);
+      if (!p.video) act.appendChild(bx); // vídeo não tem "Expandir imagem"
+      act.appendChild(bs);
       veil.appendChild(act);
       li.appendChild(veil);
       g.appendChild(li);
@@ -320,6 +323,26 @@
       proporcao(p._cls);
     };
     im.src = imgs[imgIdx] || '';
+    // Vídeo/Reel: toca o MP4 no lugar da imagem (a capa vira o poster).
+    var vid = $('v-video');
+    if (p.video) {
+      im.hidden = true;
+      vid.hidden = false;
+      vid.poster = imgs[0] || '';
+      if (vid.getAttribute('src') !== p.video) vid.src = p.video;
+      vid.onloadedmetadata = function () {
+        var rv = vid.videoWidth / vid.videoHeight;
+        p._cls = rv <= 0.9 ? 'r-45' : rv < 1.15 ? 'r-11' : rv < 1.6 ? 'r-43' : 'r-191';
+        proporcao(p._cls);
+      };
+    } else {
+      im.hidden = false;
+      vid.hidden = true;
+      vid.pause();
+      vid.removeAttribute('src');
+      vid.load();
+    }
+    $('v-expand').hidden = !!p.video;
     im.alt = 'Imagem ' + (imgIdx + 1) + ' de ' + imgs.length + (s.texto ? '. ' + resumo(p) : '. Foto do Polo 9n4');
     $('v-iprev').hidden = !multi;
     $('v-inext').hidden = !multi;
@@ -379,6 +402,8 @@
   }
 
   function fecharViewer() {
+    var vv = $('v-video');
+    if (vv) vv.pause(); // não deixa o vídeo tocando por trás depois de fechar
     document.body.classList.remove('lock');
     if (/^#post=/.test(location.hash)) { try { history.replaceState(null, '', location.pathname + location.search); } catch (e) { /* sem history */ } }
     if (viaTeclado) {

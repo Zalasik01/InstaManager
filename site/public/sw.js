@@ -136,6 +136,8 @@ self.addEventListener('fetch', function (event) {
 
   if (req.mode === 'navigate') { event.respondWith(navegacao(event)); return; }
   if (url.pathname === '/sw.js') return;
+  // Vídeo e requisições com Range (206 parcial) não passam pelo cache: o navegador cuida da reprodução.
+  if (/\.mp4$/i.test(url.pathname) || req.headers.has('range')) return;
 
   if (url.pathname === '/api/posts' || url.pathname === '/api/perfil') {
     event.respondWith(staleWhileRevalidate(event, CACHE_API, MAX_API, false));

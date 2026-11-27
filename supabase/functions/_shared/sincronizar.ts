@@ -15,7 +15,7 @@
 
 import type { SupabaseClient } from "npm:@supabase/supabase-js@2";
 import { enviarParaDrive, moverParaLixeira } from "./drive.ts";
-import { enviarParaGaleria, removerDaGaleria } from "./galeria.ts";
+import { enviarParaGaleria, enviarVideoParaGaleria, removerDaGaleria } from "./galeria.ts";
 
 const GRAPH = "https://graph.facebook.com/v23.0";
 const MAX_MIDIAS = 500;
@@ -44,11 +44,16 @@ type PostBanco = {
   drive_file_ids: string[];
   galeria_paths: string[];
   permalink: string | null;
+  video_path: string | null;
   origem: string;
 };
 
 // Posts importados que já estão no banco mas faltam no Drive e/ou na galeria do site.
-type SemImagem = { m: Midia; drive: boolean; galeria: boolean };
+// `video`: o post é um vídeo/Reel e o arquivo MP4 ainda não foi guardado (até a capa já pode estar).
+type SemImagem = { m: Midia; drive: boolean; galeria: boolean; video: boolean };
+
+// O Supabase (plano free) aceita arquivo de até 50 MB. Vídeo maior fica só com a capa e o link do Instagram.
+const LIMITE_VIDEO = 50 * 1024 * 1024;
 
 export type Plano = {
   noInstagram: number;
@@ -105,12 +110,26 @@ export function imagensDe(m: Midia): string[] {
   return lista.filter((u): u is string => !!u);
 }
 
+/**
+ * Baixa o MP4 de um vídeo/Reel do Instagram e guarda na galeria (o site toca de lá). Devolve o caminho,
+ * ou null se não for vídeo ou passar do limite de tamanho (nesse caso o site mostra só a capa).
+ */
+async function guardarVideo(db: SupabaseClient, m: Midia): Promise<string | null> {
+  if (m.media_type !== "VIDEO" || !m.media_url) return null;
+  const r = await fetch(m.media_url, { signal: AbortSignal.timeout(60000) });
+  if (!r.ok) throw new Error(`download do vídeo falhou (${r.status})`);
+  if (Number(r.headers.get("content-length") ?? 0) > LIMITE_VIDEO) return null;
+  const bytes = new Uint8Array(await r.arrayBuffer());
+  if (bytes.length > LIMITE_VIDEO) return null;
+  return await enviarVideoParaGaleria(db, bytes, `${m.id}.mp4`, new Date(m.timestamp));
+}
+
 export async function planejar(db: SupabaseClient): Promise<Plano> {
   const midias = await listarMidias(); // lança se falhar: nada é apagado
   const ids = new Set(midias.map((m) => m.id));
 
   const { data, error } = await db.from("posts")
-    .select("id,ig_media_id,legenda,agendado_para,atualizado_em,drive_file_ids,galeria_paths,permalink,origem")
+    .select("id,ig_media_id,legenda,agendado_para,atualizado_em,drive_file_ids,galeria_paths,permalink,video_path,origem")
     .eq("status", "publicado").not("ig_media_id", "is", null);
   if (error) throw new Error(`Banco: ${error.message}`);
   const banco = (data ?? []) as PostBanco[];
@@ -137,8 +156,9 @@ export async function planejar(db: SupabaseClient): Promise<Plano> {
       m: porId.get(p.ig_media_id)!,
       drive: driveAtivo() && !p.drive_file_ids?.length,
       galeria: !p.galeria_paths?.length,
+      video: porId.get(p.ig_media_id)!.media_type === "VIDEO" && !!porId.get(p.ig_media_id)!.media_url && !p.video_path,
     }))
-    .filter((x) => x.drive || x.galeria);
+    .filter((x) => x.drive || x.galeria || x.video);
 
   // Posts importados antes de o link ser gravado: o link vem da lista do Instagram.
   const semLink = banco
@@ -209,7 +229,7 @@ export async function executar(db: SupabaseClient, chat_id: number, plano: Plano
       }
     }
     // A cópia pública do site também sai (o post não existe mais no Instagram).
-    await removerDaGaleria(db, p.galeria_paths ?? []);
+    await removerDaGaleria(db, [...(p.galeria_paths ?? []), ...(p.video_path ? [p.video_path] : [])]);
     // As métricas saem junto (on delete cascade).
     const { error } = await db.from("posts").delete().eq("id", p.id);
     if (error) res.falhas.push(`Banco: ${error.message.slice(0, 80)}`);
@@ -239,10 +259,12 @@ export async function executar(db: SupabaseClient, chat_id: number, plano: Plano
     if (cabe()) {
       try {
         const g = await guardarImagens(db, m, { drive: plano.driveAtivo, galeria: true });
-        imagens += g.galeria.length;
+        const videoPath = await guardarVideo(db, m);
+        imagens += g.galeria.length + (videoPath ? 6 : 0); // vídeo pesa mais no orçamento da rodada
         res.imagensArquivadas += g.galeria.length;
         await db.from("posts").update({
           galeria_paths: g.galeria,
+          ...(videoPath ? { video_path: videoPath } : {}),
           ...(plano.driveAtivo ? { drive_file_ids: g.driveIds } : {}),
         }).eq("id", data.id);
       } catch (e) {
@@ -254,18 +276,20 @@ export async function executar(db: SupabaseClient, chat_id: number, plano: Plano
   }
 
   // 3. Posts importados antes que ainda estão sem imagem no Drive.
-  for (const { m, drive, galeria } of plano.semImagem) {
+  for (const { m, drive, galeria, video } of plano.semImagem) {
     if (!cabe()) {
       res.restantes += imagensDe(m).length;
       continue;
     }
     try {
-      const g = await guardarImagens(db, m, { drive, galeria });
-      imagens += imagensDe(m).length;
-      res.imagensArquivadas += imagensDe(m).length;
+      const g = drive || galeria ? await guardarImagens(db, m, { drive, galeria }) : { driveIds: [], galeria: [] };
+      const videoPath = video ? await guardarVideo(db, m) : null;
+      imagens += (drive || galeria ? imagensDe(m).length : 0) + (videoPath ? 6 : 0);
+      res.imagensArquivadas += drive || galeria ? imagensDe(m).length : 0;
       await db.from("posts").update({
         ...(drive ? { drive_file_ids: g.driveIds } : {}),
         ...(galeria ? { galeria_paths: g.galeria } : {}),
+        ...(videoPath ? { video_path: videoPath } : {}),
       }).eq("ig_media_id", m.id);
     } catch (e) {
       res.falhas.push(`Imagem ${m.id}: ${(e as Error).message.slice(0, 80)}`);

@@ -4,7 +4,7 @@
   Permissions-Policy: camera=(), microphone=(), geolocation=(), interest-cohort=()
   X-Frame-Options: DENY
   Cross-Origin-Opener-Policy: same-origin
-  Content-Security-Policy: default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data: https://crzmyemggpgjcrwwuwka.supabase.co; connect-src 'self' https://crzmyemggpgjcrwwuwka.supabase.co; manifest-src 'self'; worker-src 'self'; frame-ancestors 'none'; base-uri 'self'; form-action 'none'
+  Content-Security-Policy: default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data: https://crzmyemggpgjcrwwuwka.supabase.co; connect-src 'self' https://crzmyemggpgjcrwwuwka.supabase.co; media-src 'self' https://crzmyemggpgjcrwwuwka.supabase.co; manifest-src 'self'; worker-src 'self'; frame-ancestors 'none'; base-uri 'self'; form-action 'none'
 
 # Cache: regras separadas por caminho (o Cloudflare junta valores repetidos do mesmo cabeçalho).
 /

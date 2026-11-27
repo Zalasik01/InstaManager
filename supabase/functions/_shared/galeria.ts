@@ -22,6 +22,24 @@ export async function enviarParaGaleria(
   return caminho;
 }
 
+/** Envia um vídeo MP4 (Reel/vídeo do Instagram) para o bucket `galeria` e devolve o caminho. */
+export async function enviarVideoParaGaleria(
+  db: SupabaseClient,
+  bytes: Uint8Array,
+  nome: string,
+  data: Date,
+): Promise<string> {
+  const ano = String(data.getUTCFullYear());
+  const mes = String(data.getUTCMonth() + 1).padStart(2, "0");
+  const caminho = `${ano}/${mes}/${nome}`;
+  const { error } = await db.storage.from("galeria").upload(caminho, bytes, {
+    contentType: "video/mp4",
+    upsert: true,
+  });
+  if (error) throw new Error(`Galeria (vídeo): ${error.message}`);
+  return caminho;
+}
+
 /** Remove imagens da galeria (post apagado do perfil). Falhas só vão para o log. */
 export async function removerDaGaleria(db: SupabaseClient, caminhos: string[]): Promise<void> {
   if (!caminhos.length) return;
