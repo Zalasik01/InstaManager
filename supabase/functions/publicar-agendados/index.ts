@@ -5,9 +5,9 @@
 
 import { createClient } from "npm:@supabase/supabase-js@2";
 import { publicarPorTipo, type TipoPost } from "../_shared/instagram.ts";
-import { arquivarPostNoDrive } from "../_shared/arquivar.ts";
+import { concluirPublicacao } from "../_shared/concluir.ts";
+import { caminhoSemMarca, comOriginais } from "../_shared/opcoes.ts";
 import { enviarResumoPublicacao } from "../_shared/pospublicacao.ts";
-import { notificarNovoPost } from "../_shared/push.ts";
 
 const LIMITE_POR_EXECUCAO = 5;
 // Reel pode levar até ~90 s para o Instagram processar. Passado este tempo, não pega post novo:
@@ -99,11 +99,12 @@ Deno.serve(async (req) => {
     if (!post) continue; // outra execução já pegou
 
     try {
-      const urls = post.storage_paths.map(
-        (p: string) => db.storage.from("fotos").getPublicUrl(p).data.publicUrl,
-      );
       // Publica conforme o tipo: FEED (foto/carrossel), REELS (vídeo) ou STORIES (foto ou vídeo).
       const tipo: TipoPost = post.tipo ?? "FEED";
+      // Story usa a foto sem marca d'água (quando a marca está ligada, a original fica ao lado no Storage).
+      const urls = post.storage_paths.map(
+        (p: string) => db.storage.from("fotos").getPublicUrl(tipo === "STORIES" ? caminhoSemMarca(p) : p).data.publicUrl,
+      );
       const igId = await publicarPorTipo(tipo, urls, post.storage_paths, post.legenda ?? "");
       await db.from("posts").update({
         status: "publicado",
@@ -116,7 +117,7 @@ Deno.serve(async (req) => {
         // Story não tem legenda, hashtags nem link fixo (some em 24 h): pula resumo, hashtags e galeria.
         // O arquivo sai do Storage `fotos` para poupar espaço (o Instagram já processou a mídia).
         await avisar(post.chat_id, "Story agendado publicado no Instagram.");
-        if (post.storage_paths?.length) await db.storage.from("fotos").remove(post.storage_paths);
+        if (post.storage_paths?.length) await db.storage.from("fotos").remove(comOriginais(post.storage_paths));
       } else {
         await avisar(
           post.chat_id,
@@ -124,12 +125,10 @@ Deno.serve(async (req) => {
         );
         await enviarResumoPublicacao(db, post.chat_id, igId, post.id); // link, QR code e embed
         await db.rpc("registrar_usos_hashtags", { p_post_id: post.id }); // conta o uso de cada hashtag
-        // arquivarPostNoDrive só trata JPEG: o vídeo do Reel fica no Storage `fotos` por enquanto (sem galeria/Drive).
-        if (tipo === "FEED") {
-          await arquivarPostNoDrive(db, post); // cria a cópia pública (galeria) que o site mostra
-          // Aviso de post novo para quem ativou as notificações do site (falha aqui nunca derruba a publicação).
-          await notificarNovoPost(db, { id: post.id, legenda: post.legenda }).catch((e) => console.error("push:", e));
-        }
+        // Story automático (se ligado), galeria do site + Drive (foto ou Reel) e aviso de post novo no site.
+        // Nada disso derruba a publicação: concluirPublicacao trata as próprias falhas.
+        await concluirPublicacao(db, post, tipo, (t) => avisar(post.chat_id, t))
+          .catch((e) => console.error("concluir publicação:", e));
       }
     } catch (e) {
       const msg = (e as Error).message;

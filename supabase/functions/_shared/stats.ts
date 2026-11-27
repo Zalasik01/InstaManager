@@ -146,7 +146,50 @@ export async function textoStats(db: SupabaseClient): Promise<string> {
     linhas.push("", "Métricas dos últimos 30 dias ainda não coletadas.");
   }
 
+  const links = await linksMaisClicados(db, agora);
+  if (links.length) {
+    linhas.push(
+      "",
+      "Links mais clicados (30 dias):",
+      ...links.map((l, i) => `${i + 1}. ${l.titulo} · ${fmt(l.cliques)} clique(s)${l.url ? `\n   ${l.url}` : ""}`),
+    );
+  }
+
   return linhas.join("\n");
+}
+
+type LinkClicado = { titulo: string; url: string; cliques: number };
+
+/**
+ * Os 3 links do site mais clicados nos últimos 30 dias (soma de public.cliques_links por link_id).
+ * Tabela ausente, vazia ou com erro: devolve lista vazia e a seção some do /stats.
+ */
+async function linksMaisClicados(db: SupabaseClient, agora: Date): Promise<LinkClicado[]> {
+  try {
+    const { data, error } = await db
+      .from("cliques_links")
+      .select("link_id, url, titulo, cliques, dia")
+      .gte("dia", diaBr(agora, 30))
+      .order("dia", { ascending: false })
+      .limit(1000);
+    if (error || !data?.length) return [];
+    const soma = new Map<string, LinkClicado>();
+    for (const r of data) {
+      const atual = soma.get(r.link_id);
+      // Linhas em ordem do dia mais novo: título e URL ficam os mais recentes.
+      if (atual) atual.cliques += Number(r.cliques) || 0;
+      else {
+        soma.set(r.link_id, {
+          titulo: String(r.titulo || r.link_id),
+          url: String(r.url ?? ""),
+          cliques: Number(r.cliques) || 0,
+        });
+      }
+    }
+    return [...soma.values()].filter((l) => l.cliques > 0).sort((a, b) => b.cliques - a.cliques).slice(0, 3);
+  } catch {
+    return [];
+  }
 }
 
 export type GrupoHorario = { dia: number /* 0 = domingo */; hora: number; pontuacao: number; amostras: number };

@@ -8,9 +8,18 @@ import { createClient } from "npm:@supabase/supabase-js@2";
 import { encodeBase64 } from "jsr:@std/encoding@1/base64";
 import { ehVideoPath, publicarPorTipo, type TipoPost } from "../_shared/instagram.ts";
 import { ajustarProporcao, detectarFormato } from "../_shared/midia.ts";
-import { arquivarPostNoDrive } from "../_shared/arquivar.ts";
+import { concluirPublicacao } from "../_shared/concluir.ts";
+import { aplicarMarcaDagua } from "../_shared/marca.ts";
+import {
+  alternarOpcao,
+  caminhoComMarca,
+  caminhoSemMarca,
+  comOriginais,
+  OPCAO_MARCA_DAGUA,
+  OPCAO_STORY_AUTOMATICO,
+  opcaoLigada,
+} from "../_shared/opcoes.ts";
 import { enviarResumoPublicacao } from "../_shared/pospublicacao.ts";
-import { notificarNovoPost } from "../_shared/push.ts";
 import { type Resultado, verificarIntegracoes } from "../_shared/status.ts";
 import { executar as executarSync, planejar as planejarSync } from "../_shared/sincronizar.ts";
 import { formatarHorario, horaPronta, interpretarHorario } from "../_shared/horario.ts";
@@ -76,8 +85,10 @@ const teclado = (postId: string, midia: Midia = "foto") => ({
     ],
     [
       { text: "Só hashtags", callback_data: `sohash:${postId}` },
-      { text: "Cancelar", callback_data: `cancelar:${postId}` },
+      // Guarda o post (com os arquivos) no banco de fotos, para publicar depois pelo /menu.
+      { text: "Guardar no banco", callback_data: `banco:${postId}` },
     ],
+    [{ text: "Cancelar", callback_data: `cancelar:${postId}` }],
   ],
 });
 
@@ -329,9 +340,27 @@ async function tratarFoto(msg: any) {
 
   const hoje = new Date();
   const pasta = `${hoje.getUTCFullYear()}/${String(hoje.getUTCMonth() + 1).padStart(2, "0")}/${String(hoje.getUTCDate()).padStart(2, "0")}`;
-  const caminho = `${pasta}/${crypto.randomUUID()}.jpg`;
-  const up = await db.storage.from("fotos").upload(caminho, bytes, { contentType: "image/jpeg" });
+  const caminhoOriginal = `${pasta}/${crypto.randomUUID()}.jpg`;
+  const up = await db.storage.from("fotos").upload(caminhoOriginal, bytes, { contentType: "image/jpeg" });
   if (up.error) throw up.error;
+
+  // Marca d'água opcional (/menu): a versão com marca vai para o feed e a original fica ao lado no Storage,
+  // para o caso de a foto virar Story (Story não leva marca). Se a marca falhar, segue com a foto sem marca.
+  let caminho = caminhoOriginal;
+  let comMarca = false;
+  if (await opcaoLigada(db, OPCAO_MARCA_DAGUA)) {
+    try {
+      const marcada = await aplicarMarcaDagua(bytes);
+      if (marcada.length > 8 * 1024 * 1024) throw new Error("com a marca a foto passou de 8 MB");
+      const destino = caminhoComMarca(caminhoOriginal);
+      const upMarca = await db.storage.from("fotos").upload(destino, marcada, { contentType: "image/jpeg" });
+      if (upMarca.error) throw upMarca.error;
+      caminho = destino;
+      comMarca = true;
+    } catch (e) {
+      trace("marca_falhou", (e as Error).message, chat_id);
+    }
+  }
   trace("foto_no_storage", caminho, chat_id);
 
   const grupo: string | null = msg.media_group_id ?? null;
@@ -381,6 +410,7 @@ async function tratarFoto(msg: any) {
     atual.fotos_excedentes > 0 ? `Limite de 10 fotos: ${atual.fotos_excedentes} ignorada(s).` : "",
     // Em carrossel, só a foto de quem criou o post é avaliada aqui; as outras são ajustadas do mesmo jeito.
     ajuste.mudou ? `Ajustei a foto para ${ajuste.para} (era ${ajuste.de}), o limite do feed do Instagram.` : "",
+    comMarca ? "Com marca d'água (no feed; se virar Story, a foto vai sem a marca)." : "",
   ].filter(Boolean).join("\n");
   const previa = await enviar(chat_id, `${aviso ? aviso + "\n\n" : ""}Prévia da legenda:\n\n${legenda}`, {
     reply_markup: teclado(post.id, qtd > 1 ? "carrossel" : "foto"),
@@ -406,8 +436,8 @@ async function anexarFotoAoAlbum(
   });
   if (error) throw error;
   if (data === -1) {
-    // Foto extra não entra no post: apaga o arquivo órfão.
-    await db.storage.from("fotos").remove([caminho]);
+    // Foto extra não entra no post: apaga o arquivo órfão (e a original, se a foto tem marca d'água).
+    await db.storage.from("fotos").remove(comOriginais([caminho]));
   }
   return data as number;
 }
@@ -539,8 +569,9 @@ async function publicarAgora(chat_id: number, post: any, tipo: TipoPost) {
       : "Publicando no Instagram...",
   );
   try {
+    // Story usa a foto sem marca d'água (quando a marca está ligada, a original fica ao lado no Storage).
     const urls = post.storage_paths.map(
-      (p: string) => db.storage.from("fotos").getPublicUrl(p).data.publicUrl,
+      (p: string) => db.storage.from("fotos").getPublicUrl(tipo === "STORIES" ? caminhoSemMarca(p) : p).data.publicUrl,
     );
     const igId = await publicarPorTipo(tipo, urls, post.storage_paths, post.legenda ?? "");
     await db.from("posts").update({
@@ -553,18 +584,16 @@ async function publicarAgora(chat_id: number, post: any, tipo: TipoPost) {
       // Story some em 24 h e não tem permalink fixo nem hashtags: pula resumo, hashtags e galeria.
       // O arquivo sai do Storage `fotos` para poupar espaço (o Instagram já processou a mídia).
       await enviar(chat_id, "Story publicado no Instagram. Ele fica no ar por 24 horas.");
-      if (post.storage_paths?.length) await db.storage.from("fotos").remove(post.storage_paths);
+      if (post.storage_paths?.length) await db.storage.from("fotos").remove(comOriginais(post.storage_paths));
       return;
     }
     await enviar(chat_id, tipo === "REELS" ? "Reel publicado no Instagram." : "Publicado no Instagram.");
     await enviarResumoPublicacao(db, chat_id, igId, postId); // link, QR code e embed
     await db.rpc("registrar_usos_hashtags", { p_post_id: postId }); // conta o uso de cada hashtag
-    // arquivarPostNoDrive só trata JPEG: o vídeo do Reel fica no Storage `fotos` por enquanto (sem galeria/Drive).
-    if (tipo === "FEED") {
-      await arquivarPostNoDrive(db, post); // cria a cópia pública (galeria) que o site mostra
-      // Aviso de post novo para quem ativou as notificações do site (falha aqui nunca derruba a publicação).
-      await notificarNovoPost(db, { id: postId, legenda: post.legenda }).catch((e) => console.error("push:", e));
-    }
+    // Story automático (se ligado), galeria do site + Drive (foto ou Reel) e aviso de post novo no site.
+    // Nada disso derruba a publicação: concluirPublicacao trata as próprias falhas.
+    await concluirPublicacao(db, post, tipo, (t) => enviar(chat_id, t))
+      .catch((e) => console.error("concluir publicação:", e));
   } catch (e) {
     await db.from("posts").update({
       status: "erro",
@@ -591,9 +620,14 @@ async function tratarBotao(cb: any) {
   if (acao === "cancelagenda") return cancelarAgendado(cb, postId);
   if (acao === "retentar") return retentarPost(cb, postId);
   if (acao === "descartar") return descartarPost(cb, postId);
+  if (acao === "bancousar") return usarDoBanco(cb, postId);
+  if (acao === "bancoagendar") return agendarDoBanco(cb, postId);
+  if (acao === "bancoexcluir") return excluirDoBanco(cb, postId);
+  if (acao === "fixar" || acao === "desafixar") return alternarFixado(cb, postId, acao === "fixar");
 
   const { data: post } = await db.from("posts").select("*").eq("id", postId).maybeSingle();
   if (!post) return enviar(chat_id, "Post não encontrado.");
+  if (post.status === "banco") return enviar(chat_id, "Este post está no banco de fotos. Use /menu > Banco de fotos.");
   if (post.status !== "rascunho") return enviar(chat_id, `Este post já está: ${post.status}.`);
 
   if (acao === "cancelar") {
@@ -605,8 +639,24 @@ async function tratarBotao(cb: any) {
     }).eq("id", postId);
     // Apaga do chat a foto do dono e tudo o que o bot mandou para este post, e as fotos do Storage.
     await apagarMensagens(chat_id, [...(post.mensagens ?? []), cb.message.message_id]);
-    if (post.storage_paths?.length) await db.storage.from("fotos").remove(post.storage_paths);
+    if (post.storage_paths?.length) await db.storage.from("fotos").remove(comOriginais(post.storage_paths));
     return;
+  }
+
+  if (acao === "banco") {
+    // Guarda no banco de fotos: sai de rascunho (o /limpar não apaga mais) e os arquivos ficam no Storage.
+    const { data: guardou } = await db.from("posts").update({
+      status: "banco",
+      aguardando_horario: false,
+      aguardando_legenda: false,
+      atualizado_em: new Date().toISOString(),
+    }).eq("id", postId).eq("status", "rascunho").select("id").maybeSingle();
+    if (!guardou) return enviar(chat_id, "Este post já não está como rascunho.");
+    return editar(
+      chat_id,
+      cb.message.message_id,
+      `Guardado no banco de fotos. Para publicar depois: /menu > Banco de fotos.\n\n${post.legenda ?? ""}`.trim(),
+    );
   }
 
   const midia = midiaDoPost(post);
@@ -775,19 +825,33 @@ const tecladoFixo = {
   input_field_placeholder: "Toque em um botão ou envie a foto",
 };
 
-const tecladoMenu = {
-  inline_keyboard: [
-    [{ text: "Status das integrações", callback_data: "menu:status" }],
-    [
-      { text: "Agendados", callback_data: "menu:agendados" },
-      { text: "Com erro", callback_data: "menu:erros" },
+// Teclado do /menu. As opções liga/desliga mostram o estado atual, lido da tabela config.
+async function tecladoMenu() {
+  const [storyAuto, marca] = await Promise.all([
+    opcaoLigada(db, OPCAO_STORY_AUTOMATICO),
+    opcaoLigada(db, OPCAO_MARCA_DAGUA),
+  ]);
+  return {
+    inline_keyboard: [
+      [{ text: "Status das integrações", callback_data: "menu:status" }],
+      [
+        { text: "Agenda (7 dias)", callback_data: "menu:agenda" },
+        { text: "Agendados", callback_data: "menu:agendados" },
+      ],
+      [
+        { text: "Banco de fotos", callback_data: "menu:banco" },
+        { text: "Com erro", callback_data: "menu:erros" },
+      ],
+      [{ text: "Estatísticas", callback_data: "menu:stats" }, { text: "Hashtags", callback_data: "menu:hashtags" }],
+      [{ text: "Fixar posts", callback_data: "menu:fixar" }],
+      [{ text: `Story automático: ${storyAuto ? "Ligado" : "Desligado"}`, callback_data: "menu:storyauto" }],
+      [{ text: `Marca d'água: ${marca ? "Ligada" : "Desligada"}`, callback_data: "menu:marca" }],
+      [{ text: "Limpar chat", callback_data: "menu:limpar" }],
+      [{ text: "Sincronizar com o Instagram", callback_data: "menu:sync" }],
+      [{ text: "Fechar", callback_data: "menu:fechar" }],
     ],
-    [{ text: "Estatísticas", callback_data: "menu:stats" }, { text: "Hashtags", callback_data: "menu:hashtags" }],
-    [{ text: "Limpar chat", callback_data: "menu:limpar" }],
-    [{ text: "Sincronizar com o Instagram", callback_data: "menu:sync" }],
-    [{ text: "Fechar", callback_data: "menu:fechar" }],
-  ],
-};
+  };
+}
 
 const voltar = [{ text: "Voltar", callback_data: "menu:inicio" }];
 
@@ -829,7 +893,19 @@ async function tratarMenu(cb: any, sub: string) {
     await apagarMensagens(chat_id, [message_id]);
     return;
   }
-  if (sub === "inicio") return editar(chat_id, message_id, TEXTO_MENU, tecladoMenu);
+  if (sub === "inicio") return editar(chat_id, message_id, TEXTO_MENU, await tecladoMenu());
+  if (sub === "storyauto" || sub === "marca") {
+    // Alterna a opção e redesenha o menu com o estado novo.
+    try {
+      await alternarOpcao(db, sub === "storyauto" ? OPCAO_STORY_AUTOMATICO : OPCAO_MARCA_DAGUA);
+    } catch (e) {
+      await enviar(chat_id, `Não consegui mudar a opção: ${(e as Error).message}`);
+    }
+    return editar(chat_id, message_id, TEXTO_MENU, await tecladoMenu());
+  }
+  if (sub === "agenda") return mostrarAgenda(chat_id, message_id);
+  if (sub === "banco") return mostrarBanco(chat_id, message_id);
+  if (sub === "fixar") return mostrarFixar(chat_id, message_id);
   if (sub === "limpar") {
     // Mesmo efeito do /limpar: descarta rascunhos pendentes e apaga o chat até esta mensagem.
     await db.from("posts").update({
@@ -991,9 +1067,10 @@ async function cancelarAgendado(cb: any, postId: string) {
   }
   // Apaga as mensagens do post e as fotos do Storage, como no cancelamento de rascunho.
   await apagarMensagens(chat_id, post.mensagens ?? []);
-  if (post.storage_paths?.length) await db.storage.from("fotos").remove(post.storage_paths);
-  // Veio da lista do /menu: atualiza a lista. Veio da confirmação do agendamento: apaga essa mensagem.
+  if (post.storage_paths?.length) await db.storage.from("fotos").remove(comOriginais(post.storage_paths));
+  // Veio de uma lista (/menu ou /agenda): atualiza a lista. Veio da confirmação do agendamento: apaga essa mensagem.
   if (String(cb.message.text ?? "").startsWith("Posts agendados")) return mostrarAgendados(chat_id, message_id);
+  if (String(cb.message.text ?? "").startsWith(TITULO_AGENDA)) return mostrarAgenda(chat_id, message_id);
   await apagarMensagens(chat_id, [message_id]);
 }
 
@@ -1020,8 +1097,246 @@ async function descartarPost(cb: any, postId: string) {
   const { data: post } = await db.from("posts")
     .update({ status: "cancelado", atualizado_em: new Date().toISOString() })
     .eq("id", postId).eq("status", "erro").select("storage_paths").maybeSingle();
-  if (post?.storage_paths?.length) await db.storage.from("fotos").remove(post.storage_paths);
+  if (post?.storage_paths?.length) await db.storage.from("fotos").remove(comOriginais(post.storage_paths));
   return mostrarErros(chat_id, cb.message.message_id);
+}
+
+// ---------- Agenda dos próximos 7 dias (/agenda e /menu > Agenda) ----------
+
+const TITULO_AGENDA = "Agenda dos próximos 7 dias";
+const BRT_MS = 3 * 60 * 60 * 1000; // Brasília = UTC-3, sem horário de verão (igual a horario.ts)
+const DIAS_SEMANA = ["dom", "seg", "ter", "qua", "qui", "sex", "sáb"];
+const dois = (n: number) => String(n).padStart(2, "0");
+
+/** Partes da data no relógio de Brasília: rótulo do dia ("dom, 30/11") e hora ("19:00"). */
+function partesBr(d: Date): { dia: string; hora: string } {
+  const br = new Date(d.getTime() - BRT_MS);
+  return {
+    dia: `${DIAS_SEMANA[br.getUTCDay()]}, ${dois(br.getUTCDate())}/${dois(br.getUTCMonth() + 1)}`,
+    hora: `${dois(br.getUTCHours())}:${dois(br.getUTCMinutes())}`,
+  };
+}
+
+/** Tipo do post em uma palavra: Foto, Carrossel, Reel ou Story. */
+function tipoCurto(p: { tipo?: string | null; storage_paths: string[] }): string {
+  if (p.tipo === "STORIES") return "Story";
+  if (p.tipo === "REELS" || ehVideoPath(p.storage_paths?.[0])) return "Reel";
+  return (p.storage_paths?.length ?? 0) > 1 ? "Carrossel" : "Foto";
+}
+
+/** Começo da legenda (primeira linha, sem hashtags), para as listas. */
+function comecoLegenda(legenda: string | null | undefined, max = 50): string {
+  const t = String(legenda ?? "").split("\n")[0].replace(/#[\p{L}\p{N}_]+/gu, "").replace(/\s+/g, " ").trim();
+  if (!t) return "(sem legenda)";
+  return t.length > max ? t.slice(0, max - 1).trimEnd() + "…" : t;
+}
+
+/** Lista os agendados dos próximos 7 dias, por dia. Com message_id edita a mensagem; sem, manda uma nova. */
+async function mostrarAgenda(chat_id: number, message_id?: number) {
+  const agora = new Date();
+  const ate = new Date(agora.getTime() + 7 * 86400_000);
+  const { data } = await db.from("posts").select("id,legenda,agendado_para,storage_paths,tipo")
+    .eq("chat_id", chat_id).eq("status", "agendado")
+    .lte("agendado_para", ate.toISOString())
+    .order("agendado_para", { ascending: true }).limit(30);
+  const lista = data ?? [];
+
+  let texto: string;
+  const botoes: Array<Array<{ text: string; callback_data: string }>> = [];
+  if (!lista.length) {
+    texto = `${TITULO_AGENDA}\n\nNada agendado para os próximos 7 dias.`;
+  } else {
+    const linhas: string[] = [TITULO_AGENDA];
+    let diaAtual = "";
+    lista.forEach((p, i) => {
+      const { dia, hora } = partesBr(new Date(p.agendado_para));
+      if (dia !== diaAtual) {
+        linhas.push("", dia);
+        diaAtual = dia;
+      }
+      const tipo = tipoCurto(p);
+      linhas.push(`${i + 1}. ${hora} · ${tipo} · ${tipo === "Story" ? "(Story, sem legenda)" : comecoLegenda(p.legenda)}`);
+      // Mesmo callback do cancelamento dos agendados: cancelarAgendado redesenha esta lista.
+      botoes.push([{ text: `Cancelar ${i + 1} (${dia} ${hora})`, callback_data: `cancelagenda:${p.id}` }]);
+    });
+    texto = linhas.join("\n");
+  }
+  botoes.push(voltar);
+  if (message_id) return editar(chat_id, message_id, texto, { inline_keyboard: botoes });
+  return enviar(chat_id, texto, { reply_markup: { inline_keyboard: botoes } });
+}
+
+// ---------- Banco de fotos (/menu > Banco de fotos) ----------
+
+const TITULO_BANCO = "Banco de fotos";
+
+async function mostrarBanco(chat_id: number, message_id: number, aviso = "") {
+  const { data } = await db.from("posts").select("id,legenda,criado_em,storage_paths,tipo")
+    .eq("chat_id", chat_id).eq("status", "banco")
+    .order("criado_em", { ascending: true }).limit(10);
+  const lista = data ?? [];
+  const topo = `${TITULO_BANCO}${aviso ? `\n\n${aviso}` : ""}`;
+  if (!lista.length) {
+    return editar(
+      chat_id,
+      message_id,
+      `${topo}\n\nNada guardado. Na prévia de uma foto ou vídeo, toque em "Guardar no banco".`,
+      { inline_keyboard: [voltar] },
+    );
+  }
+  const linhas = lista.map((p, i) =>
+    `${i + 1}. ${partesBr(new Date(p.criado_em)).dia} · ${tipoCurto({ ...p, tipo: p.tipo === "STORIES" ? null : p.tipo })} · ${comecoLegenda(p.legenda)}`
+  );
+  const botoes = lista.flatMap((p, i) => [
+    [
+      { text: `Usar ${i + 1}`, callback_data: `bancousar:${p.id}` },
+      { text: `Excluir ${i + 1}`, callback_data: `bancoexcluir:${p.id}` },
+    ],
+    [{ text: `Agendar ${i + 1} no melhor horário`, callback_data: `bancoagendar:${p.id}` }],
+  ]);
+  botoes.push(voltar);
+  return editar(chat_id, message_id, `${topo}\n\nMais antigos primeiro:\n${linhas.join("\n")}`, { inline_keyboard: botoes });
+}
+
+/** Reenvia a mídia guardada (pelo file_id do Telegram). Devolve o id da mensagem, ou undefined se falhar. */
+// deno-lint-ignore no-explicit-any
+async function reenviarMidia(chat_id: number, post: any): Promise<number | undefined> {
+  const fileId: string | undefined = post.telegram_file_ids?.[0];
+  if (!fileId) return undefined;
+  const video = midiaDoPost(post) === "video";
+  // Foto/vídeo enviado como arquivo tem file_id de documento: sendPhoto/sendVideo recusa, então tenta sendDocument.
+  for (const [metodo, campo] of video
+    ? [["sendVideo", "video"], ["sendDocument", "document"]]
+    : [["sendPhoto", "photo"], ["sendDocument", "document"]]) {
+    const r = await tg(metodo, { chat_id, [campo]: fileId }).catch(() => null);
+    if (r?.ok) return idDe(r);
+  }
+  return undefined;
+}
+
+// deno-lint-ignore no-explicit-any
+async function usarDoBanco(cb: any, postId: string) {
+  const chat_id: number = cb.message.chat.id;
+  // Volta a rascunho. O tipo é refeito pela mídia (um Agendar Story antigo não fica valendo).
+  const { data: post } = await db.from("posts").update({
+    status: "rascunho",
+    aguardando_horario: false,
+    aguardando_legenda: false,
+    atualizado_em: new Date().toISOString(),
+  }).eq("id", postId).eq("status", "banco").select("*").maybeSingle();
+  if (!post) return mostrarBanco(chat_id, cb.message.message_id, "Esse item não está mais no banco.");
+  const midia = midiaDoPost(post);
+  if (post.tipo === "STORIES") {
+    await db.from("posts").update({ tipo: midia === "video" ? "REELS" : "FEED" }).eq("id", postId);
+  }
+  const idMidia = await reenviarMidia(chat_id, post);
+  const previa = await enviar(chat_id, `Do banco de fotos. Prévia da legenda:\n\n${post.legenda ?? ""}`, {
+    reply_markup: teclado(postId, midia),
+  });
+  await lembrar([idMidia, idDe(previa)], { postId });
+  return mostrarBanco(chat_id, cb.message.message_id);
+}
+
+// deno-lint-ignore no-explicit-any
+async function agendarDoBanco(cb: any, postId: string) {
+  const chat_id: number = cb.message.chat.id;
+  const message_id: number = cb.message.message_id;
+  const agora = new Date();
+  // Melhor horário pelos dados de alcance; sem dados suficientes, amanhã às 19h.
+  const sugeridos = await proximosHorariosSugeridos(db, agora).catch(() => [] as Date[]);
+  const quando = sugeridos[0] ?? horaPronta(agora, 1, 19);
+
+  const { data: atual } = await db.from("posts").select("storage_paths").eq("id", postId).eq("status", "banco")
+    .maybeSingle();
+  if (!atual) return mostrarBanco(chat_id, message_id, "Esse item não está mais no banco.");
+  const tipo: TipoPost = ehVideoPath(atual.storage_paths?.[0]) ? "REELS" : "FEED";
+  const { data } = await db.from("posts").update({
+    status: "agendado",
+    tipo,
+    agendado_para: quando.toISOString(),
+    aguardando_horario: false,
+    aguardando_legenda: false,
+    atualizado_em: new Date().toISOString(),
+  }).eq("id", postId).eq("status", "banco").select("id").maybeSingle();
+  if (!data) return mostrarBanco(chat_id, message_id, "Esse item não está mais no banco.");
+  await enviar(
+    chat_id,
+    `${tipo === "REELS" ? "Reel agendado" : "Agendado"} para ${formatarHorario(quando)} (horário de Brasília)${sugeridos.length ? ", o melhor horário pelos seus dados" : ""}.`,
+    { reply_markup: { inline_keyboard: [[{ text: "Cancelar agendamento", callback_data: `cancelagenda:${postId}` }]] } },
+  );
+  return mostrarBanco(chat_id, message_id);
+}
+
+// deno-lint-ignore no-explicit-any
+async function excluirDoBanco(cb: any, postId: string) {
+  const chat_id: number = cb.message.chat.id;
+  // Apaga a linha só se ainda estiver no banco; os arquivos saem do Storage depois.
+  const { data: post } = await db.from("posts").delete()
+    .eq("id", postId).eq("status", "banco").select("storage_paths").maybeSingle();
+  if (!post) return mostrarBanco(chat_id, cb.message.message_id, "Esse item não está mais no banco.");
+  if (post.storage_paths?.length) await db.storage.from("fotos").remove(comOriginais(post.storage_paths));
+  return mostrarBanco(chat_id, cb.message.message_id, "Item excluído.");
+}
+
+// ---------- Posts fixados no site (/menu > Fixar posts) ----------
+
+const MAX_FIXADOS = 3;
+
+async function mostrarFixar(chat_id: number, message_id: number, aviso = "") {
+  // Data real de publicação = coalesce(agendado_para, atualizado_em). O PostgREST não ordena por coalesce:
+  // busca os 9 mais novos com agendado_para e os 9 mais novos sem ele, e junta aqui.
+  const colunas = "id,legenda,agendado_para,atualizado_em,storage_paths,tipo,fixado_ordem";
+  const [comData, semData] = await Promise.all([
+    db.from("posts").select(colunas).eq("status", "publicado").neq("tipo", "STORIES")
+      .not("agendado_para", "is", null).order("agendado_para", { ascending: false }).limit(9),
+    db.from("posts").select(colunas).eq("status", "publicado").neq("tipo", "STORIES")
+      .is("agendado_para", null).order("atualizado_em", { ascending: false }).limit(9),
+  ]);
+  const quando = (p: { agendado_para: string | null; atualizado_em: string }) =>
+    new Date(p.agendado_para ?? p.atualizado_em).getTime();
+  const lista = [...(comData.data ?? []), ...(semData.data ?? [])].sort((a, b) => quando(b) - quando(a)).slice(0, 9);
+  const topo = `Fixar posts no site (até ${MAX_FIXADOS}). Os fixados aparecem primeiro.${aviso ? `\n\n${aviso}` : ""}`;
+  if (!lista.length) return editar(chat_id, message_id, `${topo}\n\nNenhum post publicado.`, { inline_keyboard: [voltar] });
+
+  const linhas = lista.map((p, i) =>
+    `${i + 1}. ${p.fixado_ordem ? "📌 " : ""}${partesBr(new Date(quando(p))).dia} · ${tipoCurto(p)} · ${comecoLegenda(p.legenda, 40)}`
+  );
+  const botoes = lista.map((p, i) => [
+    p.fixado_ordem
+      ? { text: `Desafixar ${i + 1}`, callback_data: `desafixar:${p.id}` }
+      : { text: `📌 Fixar ${i + 1}`, callback_data: `fixar:${p.id}` },
+  ]);
+  botoes.push(voltar);
+  return editar(chat_id, message_id, `${topo}\n\n${linhas.join("\n")}`, { inline_keyboard: botoes });
+}
+
+/** Renumera os fixados como 1, 2, 3 (na ordem atual), para o próximo entrar no fim. */
+async function compactarFixados(): Promise<number> {
+  const { data } = await db.from("posts").select("id,fixado_ordem").not("fixado_ordem", "is", null)
+    .order("fixado_ordem", { ascending: true });
+  const fixados = data ?? [];
+  for (const [i, p] of fixados.entries()) {
+    if (p.fixado_ordem !== i + 1) await db.from("posts").update({ fixado_ordem: i + 1 }).eq("id", p.id);
+  }
+  return fixados.length;
+}
+
+// deno-lint-ignore no-explicit-any
+async function alternarFixado(cb: any, postId: string, fixar: boolean) {
+  const chat_id: number = cb.message.chat.id;
+  const message_id: number = cb.message.message_id;
+  if (!fixar) {
+    await db.from("posts").update({ fixado_ordem: null }).eq("id", postId);
+    await compactarFixados();
+    return mostrarFixar(chat_id, message_id);
+  }
+  const total = await compactarFixados();
+  if (total >= MAX_FIXADOS) {
+    return mostrarFixar(chat_id, message_id, `Já há ${MAX_FIXADOS} posts fixados. Desafixe um antes de fixar outro.`);
+  }
+  const { data } = await db.from("posts").update({ fixado_ordem: total + 1 })
+    .eq("id", postId).eq("status", "publicado").is("fixado_ordem", null).select("id").maybeSingle();
+  return mostrarFixar(chat_id, message_id, data ? "" : "Não consegui fixar: o post não está publicado ou já está fixado.");
 }
 
 /** Texto livre do dono: se há um post esperando legenda manual, o texto vira a legenda. Devolve false se não há. */
@@ -1101,7 +1416,9 @@ async function processarUpdate(update: any) {
       // ignora em silêncio
     } else if (/^(\/menu|menu)$/i.test(msg?.text?.trim() ?? "")) {
       // Vale para o comando /menu e para o botão fixo "Menu".
-      await enviar(chat_id!, TEXTO_MENU, { reply_markup: tecladoMenu });
+      await enviar(chat_id!, TEXTO_MENU, { reply_markup: await tecladoMenu() });
+    } else if (/^\/agenda/i.test(msg?.text?.trim() ?? "")) {
+      await mostrarAgenda(chat_id!);
     } else if (/^\/stats/i.test(msg?.text?.trim() ?? "")) {
       await enviar(chat_id!, await textoStats(db));
     } else if (/^\/hashtags/i.test(msg?.text?.trim() ?? "")) {

@@ -1,4 +1,4 @@
-// Arquivo permanente das fotos no Google Drive: PASTA_RAIZ/AAAA/MM/DD/arquivo.jpg
+// Arquivo permanente das fotos (e dos vídeos dos Reels) no Google Drive: PASTA_RAIZ/AAAA/MM/DD/arquivo
 // Secrets: GOOGLE_CLIENT_ID, GOOGLE_CLIENT_SECRET, GOOGLE_REFRESH_TOKEN.
 //
 // Por que OAuth e não conta de serviço: conta de serviço não tem cota no Drive pessoal
@@ -105,7 +105,21 @@ export async function moverParaLixeira(id: string): Promise<void> {
 }
 
 /** Envia o JPEG para PASTA_RAIZ/AAAA/MM/DD (data em UTC, igual ao caminho do Storage). Devolve o id do arquivo. */
-export async function enviarParaDrive(bytes: Uint8Array, nomeArquivo: string, data: Date): Promise<string> {
+export function enviarParaDrive(bytes: Uint8Array, nomeArquivo: string, data: Date): Promise<string> {
+  return enviarArquivoParaDrive(bytes, nomeArquivo, data, "image/jpeg");
+}
+
+/**
+ * Envia qualquer arquivo (ex.: o MP4 de um Reel, mime "video/mp4") para PASTA_RAIZ/AAAA/MM/DD.
+ * O upload multipart manda tudo numa requisição só: serve para arquivos de até ~20 MB, que é o que o bot recebe.
+ * Devolve o id do arquivo.
+ */
+export async function enviarArquivoParaDrive(
+  bytes: Uint8Array,
+  nomeArquivo: string,
+  data: Date,
+  mime: string,
+): Promise<string> {
   const ano = String(data.getUTCFullYear());
   const mes = String(data.getUTCMonth() + 1).padStart(2, "0");
   const dia = String(data.getUTCDate()).padStart(2, "0");
@@ -113,13 +127,13 @@ export async function enviarParaDrive(bytes: Uint8Array, nomeArquivo: string, da
   let pai = PASTA_RAIZ;
   for (const nome of [ano, mes, dia]) pai = await acharOuCriarPasta(nome, pai);
 
-  // Upload multipart/related: parte 1 = metadados JSON, parte 2 = bytes do JPEG.
+  // Upload multipart/related: parte 1 = metadados JSON, parte 2 = bytes do arquivo.
   const limite = `instamanager_${crypto.randomUUID()}`;
   const enc = new TextEncoder();
   const cabeca = enc.encode(
     `--${limite}\r\nContent-Type: application/json; charset=UTF-8\r\n\r\n` +
       JSON.stringify({ name: nomeArquivo, parents: [pai] }) +
-      `\r\n--${limite}\r\nContent-Type: image/jpeg\r\n\r\n`,
+      `\r\n--${limite}\r\nContent-Type: ${mime}\r\n\r\n`,
   );
   const rabo = enc.encode(`\r\n--${limite}--`);
   const corpo = new Uint8Array(cabeca.length + bytes.length + rabo.length);
