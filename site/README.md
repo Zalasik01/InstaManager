@@ -9,9 +9,10 @@ cd site
 npx wrangler dev
 ```
 
-## Publicar em duas etapas
+## Publicar
 
-**1. Agora (domínio ainda não ativo).** Publica no endereço provisório `polo9n.<conta>.workers.dev`:
+O domínio `polo9n.com.br` já está ativo no Cloudflare. Um único comando publica o site e mantém ligados o
+endereço principal e o `www` (que redireciona para o principal):
 
 ```
 cd site
@@ -19,13 +20,4 @@ npx wrangler login   # uma vez só
 npx wrangler deploy
 ```
 
-**2. Quando o domínio estiver ativo.** No Registro.br, troque os servidores de nomes (DNS) de `polo9n.com.br`
-pelos dois que o Cloudflare mostra no painel da zona. Quando a zona ficar "Ativa", ligue o domínio:
-
-```
-cd site
-npx wrangler deploy -c wrangler.dominio.jsonc
-```
-
-Esse comando cria o domínio personalizado (`polo9n.com.br` e `www.polo9n.com.br`). Se a zona ainda não estiver
-ativa, o comando falha sem estragar o que já está publicado.
+Cada publicação gera uma versão nova: o site se atualiza sozinho para todos os visitantes (veja `src/index.ts`).

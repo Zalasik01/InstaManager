@@ -1,13 +1,17 @@
 // Publica os posts agendados que já chegaram na hora. Chamada a cada minuto pelo pg_cron (ver migração de agendamento).
+// Publica conforme posts.tipo: FEED (foto/carrossel), REELS (vídeo) ou STORIES (foto ou vídeo).
 // Secrets: CRON_SECRET, TELEGRAM_BOT_TOKEN, IG_ACCESS_TOKEN, IG_USER_ID.
 // Deploy sem verificação de JWT (a autenticação é o header x-cron-secret): functions deploy publicar-agendados --no-verify-jwt
 
 import { createClient } from "npm:@supabase/supabase-js@2";
-import { publicarNoInstagram } from "../_shared/instagram.ts";
+import { publicarPorTipo, type TipoPost } from "../_shared/instagram.ts";
 import { arquivarPostNoDrive } from "../_shared/arquivar.ts";
 import { enviarResumoPublicacao } from "../_shared/pospublicacao.ts";
 
 const LIMITE_POR_EXECUCAO = 5;
+// Reel pode levar até ~90 s para o Instagram processar. Passado este tempo, não pega post novo:
+// o cron roda de novo no minuto seguinte e continua de onde parou (a função morre perto de 150 s).
+const ORCAMENTO_MS = 40000;
 
 const db = createClient(
   Deno.env.get("SUPABASE_URL")!,
@@ -79,8 +83,10 @@ Deno.serve(async (req) => {
 
   let publicados = 0;
   let falhas = 0;
+  const inicio = Date.now();
 
   for (const { id } of vencidos ?? []) {
+    if (Date.now() - inicio > ORCAMENTO_MS) break; // o resto fica para a próxima execução
     // Trava atômica: só uma execução consegue mudar agendado -> publicando.
     const { data: post } = await db
       .from("posts")
@@ -95,7 +101,9 @@ Deno.serve(async (req) => {
       const urls = post.storage_paths.map(
         (p: string) => db.storage.from("fotos").getPublicUrl(p).data.publicUrl,
       );
-      const igId = await publicarNoInstagram(urls, post.legenda ?? "");
+      // Publica conforme o tipo: FEED (foto/carrossel), REELS (vídeo) ou STORIES (foto ou vídeo).
+      const tipo: TipoPost = post.tipo ?? "FEED";
+      const igId = await publicarPorTipo(tipo, urls, post.storage_paths, post.legenda ?? "");
       await db.from("posts").update({
         status: "publicado",
         ig_media_id: igId,
@@ -103,10 +111,21 @@ Deno.serve(async (req) => {
         atualizado_em: new Date().toISOString(),
       }).eq("id", id);
       publicados++;
-      await avisar(post.chat_id, "Post agendado publicado no Instagram.");
-      await enviarResumoPublicacao(db, post.chat_id, igId, post.id); // link, QR code e embed
-      await db.rpc("registrar_usos_hashtags", { p_post_id: post.id }); // conta o uso de cada hashtag
-      await arquivarPostNoDrive(db, post);
+      if (tipo === "STORIES") {
+        // Story não tem legenda, hashtags nem link fixo (some em 24 h): pula resumo, hashtags e galeria.
+        // O arquivo sai do Storage `fotos` para poupar espaço (o Instagram já processou a mídia).
+        await avisar(post.chat_id, "Story agendado publicado no Instagram.");
+        if (post.storage_paths?.length) await db.storage.from("fotos").remove(post.storage_paths);
+      } else {
+        await avisar(
+          post.chat_id,
+          tipo === "REELS" ? "Reel agendado publicado no Instagram." : "Post agendado publicado no Instagram.",
+        );
+        await enviarResumoPublicacao(db, post.chat_id, igId, post.id); // link, QR code e embed
+        await db.rpc("registrar_usos_hashtags", { p_post_id: post.id }); // conta o uso de cada hashtag
+        // arquivarPostNoDrive só trata JPEG: o vídeo do Reel fica no Storage `fotos` por enquanto (sem galeria/Drive).
+        if (tipo === "FEED") await arquivarPostNoDrive(db, post);
+      }
     } catch (e) {
       const msg = (e as Error).message;
       await db.from("posts").update({

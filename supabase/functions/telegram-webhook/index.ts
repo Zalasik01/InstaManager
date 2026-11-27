@@ -1,16 +1,19 @@
 // Webhook do bot do Telegram.
 // Fluxo: recebe foto -> guarda no Storage -> Gemini escreve legenda -> responde com prévia e botões.
+// Vídeo (MP4 até 20 MB): guarda no Storage -> legenda gerada a partir da capa -> prévia com botões de Reel/Story.
 // Secrets necessários: TELEGRAM_BOT_TOKEN, TELEGRAM_WEBHOOK_SECRET, ALLOWED_CHAT_ID, GEMINI_API_KEY.
 // SUPABASE_URL e SUPABASE_SERVICE_ROLE_KEY já existem no ambiente das Edge Functions.
 
 import { createClient } from "npm:@supabase/supabase-js@2";
 import { encodeBase64 } from "jsr:@std/encoding@1/base64";
-import { publicarNoInstagram } from "../_shared/instagram.ts";
+import { ehVideoPath, publicarPorTipo, type TipoPost } from "../_shared/instagram.ts";
+import { ajustarProporcao, detectarFormato } from "../_shared/midia.ts";
 import { arquivarPostNoDrive } from "../_shared/arquivar.ts";
 import { enviarResumoPublicacao } from "../_shared/pospublicacao.ts";
 import { type Resultado, verificarIntegracoes } from "../_shared/status.ts";
 import { executar as executarSync, planejar as planejarSync } from "../_shared/sincronizar.ts";
 import { formatarHorario, horaPronta, interpretarHorario } from "../_shared/horario.ts";
+import { proximosHorariosSugeridos, textoStats } from "../_shared/stats.ts";
 
 const TOKEN = Deno.env.get("TELEGRAM_BOT_TOKEN")!;
 const WEBHOOK_SECRET = Deno.env.get("TELEGRAM_WEBHOOK_SECRET")!;
@@ -40,15 +43,32 @@ const tg = (method: string, body: Record<string, unknown>) =>
     body: JSON.stringify(body),
   }).then((r) => r.json());
 
+// Maior arquivo que o Telegram deixa um bot baixar (getFile): 20 MB.
+const LIMITE_TELEGRAM = 20 * 1024 * 1024;
+
 const enviar = (chat_id: number, text: string, extra: Record<string, unknown> = {}) =>
   tg("sendMessage", { chat_id, text, ...extra });
 
-const teclado = (postId: string) => ({
+// Tipo de mídia do rascunho: decide quais botões aparecem na prévia.
+type Midia = "foto" | "carrossel" | "video";
+
+// deno-lint-ignore no-explicit-any
+const midiaDoPost = (post: any): Midia =>
+  ehVideoPath(post?.storage_paths?.[0]) ? "video" : (post?.storage_paths?.length ?? 0) > 1 ? "carrossel" : "foto";
+
+// Foto: Postar agora (feed). Vídeo: Postar como Reel. Story só para foto única ou vídeo (carrossel não vira Story).
+const teclado = (postId: string, midia: Midia = "foto") => ({
   inline_keyboard: [
     [
-      { text: "Postar agora", callback_data: `agora:${postId}` },
+      midia === "video"
+        ? { text: "Postar como Reel", callback_data: `reel:${postId}` }
+        : { text: "Postar agora", callback_data: `agora:${postId}` },
       { text: "Agendar", callback_data: `agendar:${postId}` },
     ],
+    ...(midia === "carrossel" ? [] : [[
+      { text: "Postar como Story", callback_data: `story:${postId}` },
+      { text: "Agendar Story", callback_data: `agendarstory:${postId}` },
+    ]]),
     [
       { text: "Regerar legenda", callback_data: `regerar:${postId}` },
       { text: "Definir legenda manualmente", callback_data: `manual:${postId}` },
@@ -145,9 +165,13 @@ async function carregarContexto(): Promise<string> {
   return data?.valor ?? CONTEXTO_PADRAO;
 }
 
-async function gerarLegenda(jpeg: Uint8Array, dica: string | null): Promise<string> {
+// jpeg null (vídeo sem capa): devolve a legenda simples, que o dono pode trocar depois.
+async function gerarLegenda(jpeg: Uint8Array | null, dica: string | null): Promise<string> {
   const tags = await escolherHashtags();
-  if (!GEMINI_KEY) return `Polo 2012 9n4.\n\n${tags.join(" ")}`;
+  if (!GEMINI_KEY || !jpeg) {
+    legendaFallback = false;
+    return `Polo 2012 9n4.\n\n${tags.join(" ")}`;
+  }
 
   const contexto = await carregarContexto();
   const prompt = [
@@ -259,24 +283,48 @@ async function tratarFoto(msg: any) {
   const arquivo = msg.photo
     ? msg.photo[msg.photo.length - 1] // maior resolução
     : msg.document;
-  if (msg.document && !String(msg.document.mime_type).startsWith("image/")) {
-    return enviar(chat_id, "Envie apenas imagens.");
+  const mime = String(msg.document?.mime_type ?? "");
+  if (msg.document && !mime.startsWith("image/")) {
+    return enviar(chat_id, "Envie apenas imagens ou vídeo MP4.");
+  }
+  // HEIC (padrão do iPhone) não é suportado pela conversão: avisa antes de baixar.
+  if (/^image\/hei[cf]/.test(mime)) {
+    return enviar(chat_id, "Foto em HEIC não é suportada. Envie como foto normal, ou o arquivo em JPEG ou PNG.");
+  }
+  // O Telegram só deixa o bot baixar arquivos de até 20 MB.
+  if (Number(arquivo.file_size ?? 0) > LIMITE_TELEGRAM) {
+    return enviar(chat_id, "O arquivo passa de 20 MB, o máximo que o Telegram deixa o bot baixar. Envie como foto normal (comprimida).");
   }
   const dica = msg.caption?.trim() || null;
 
   trace("foto_recebida", `${arquivo.file_size ?? "?"} bytes, album=${msg.media_group_id ?? "não"}`, chat_id);
   // Confirma na hora que recebeu (em álbum, só a primeira foto avisa, para não encher o chat).
   const recebiId = msg.media_group_id ? undefined : idDe(await enviar(chat_id, "Recebi a foto, processando..."));
-  const bytes = await baixarArquivoTelegram(arquivo.file_id);
-  trace("foto_baixada", `${bytes.length} bytes`, chat_id);
+  const original = await baixarArquivoTelegram(arquivo.file_id);
+  trace("foto_baixada", `${original.length} bytes`, chat_id);
+
+  // Deixa pronta para o feed: corrige a proporção (4:5 a 1,91:1), converte PNG/WebP em JPEG e reduz
+  // documentos grandes. A foto guardada no Storage já é a ajustada.
+  let ajuste: Awaited<ReturnType<typeof ajustarProporcao>>;
+  try {
+    ajuste = await ajustarProporcao(original);
+  } catch (e) {
+    const fmt = detectarFormato(original);
+    trace("foto_formato_falhou", `${fmt}: ${(e as Error).message}`, chat_id);
+    // HEIC e formato desconhecido já vêm com mensagem pronta; falha de decodificação ganha uma genérica.
+    return enviar(
+      chat_id,
+      fmt === "heic" || fmt === "desconhecido"
+        ? (e as Error).message
+        : "Não consegui ler esta imagem. Envie como foto normal ou o arquivo em JPEG ou PNG.",
+    );
+  }
+  const bytes = ajuste.bytes;
+  if (ajuste.reencodado) trace("foto_ajustada", `${ajuste.de} -> ${ajuste.para}, ${bytes.length} bytes`, chat_id);
   // O Instagram recusa JPEG acima de 8 MB.
   if (bytes.length > 8 * 1024 * 1024) {
     return enviar(chat_id, "A foto passa de 8 MB e o Instagram recusa. Envie como foto normal (comprimida).");
   }
-
-  // Storage só aceita JPEG (é o que o Instagram exige). PNG/HEIC: conversão fica para a fase 7.
-  const ehJpeg = bytes[0] === 0xff && bytes[1] === 0xd8;
-  if (!ehJpeg) return enviar(chat_id, "Por enquanto só aceito JPEG. Envie como foto normal ou arquivo .jpg.");
 
   const hoje = new Date();
   const pasta = `${hoje.getUTCFullYear()}/${String(hoje.getUTCMonth() + 1).padStart(2, "0")}/${String(hoje.getUTCDate()).padStart(2, "0")}`;
@@ -330,9 +378,11 @@ async function tratarFoto(msg: any) {
     legendaFallback ? "O Gemini não respondeu, então usei uma legenda simples. Toque em Regerar legenda para tentar de novo." : "",
     qtd > 1 ? `Carrossel com ${qtd} fotos.` : "",
     atual.fotos_excedentes > 0 ? `Limite de 10 fotos: ${atual.fotos_excedentes} ignorada(s).` : "",
+    // Em carrossel, só a foto de quem criou o post é avaliada aqui; as outras são ajustadas do mesmo jeito.
+    ajuste.mudou ? `Ajustei a foto para ${ajuste.para} (era ${ajuste.de}), o limite do feed do Instagram.` : "",
   ].filter(Boolean).join("\n");
   const previa = await enviar(chat_id, `${aviso ? aviso + "\n\n" : ""}Prévia da legenda:\n\n${legenda}`, {
-    reply_markup: teclado(post.id),
+    reply_markup: teclado(post.id, qtd > 1 ? "carrossel" : "foto"),
   });
   await lembrar([idDe(previa)], { postId: post.id });
   trace("previa_enviada", post.id, chat_id);
@@ -361,6 +411,166 @@ async function anexarFotoAoAlbum(
   return data as number;
 }
 
+// Pasta do dia no Storage: AAAA/MM/DD.
+function pastaDoDia(): string {
+  const hoje = new Date();
+  return `${hoje.getUTCFullYear()}/${String(hoje.getUTCMonth() + 1).padStart(2, "0")}/${String(hoje.getUTCDate()).padStart(2, "0")}`;
+}
+
+// Vídeo (msg.video ou documento video/mp4): vira rascunho de Reel. A legenda sai da capa que o Telegram manda.
+// deno-lint-ignore no-explicit-any
+async function tratarVideo(msg: any) {
+  const chat_id: number = msg.chat.id;
+  const video = msg.video ?? msg.document;
+  const mime = String(video.mime_type ?? "video/mp4");
+  if (mime !== "video/mp4") {
+    return enviar(chat_id, "Só aceito vídeo em MP4. Envie o vídeo pelo Telegram como vídeo normal (ele converte para MP4).");
+  }
+  if (msg.media_group_id) {
+    return enviar(chat_id, "Envie o vídeo sozinho, fora de um álbum. Reel é um vídeo por post.");
+  }
+  // O Telegram só deixa o bot baixar arquivos de até 20 MB (getFile).
+  if (Number(video.file_size ?? 0) > LIMITE_TELEGRAM) {
+    const mb = (Number(video.file_size) / 1024 / 1024).toFixed(1).replace(".", ",");
+    return enviar(
+      chat_id,
+      `O vídeo tem ${mb} MB e o Telegram só deixa o bot baixar até 20 MB. Envie um vídeo menor (mais curto ou comprimido; enviar como vídeo normal, e não como arquivo, já reduz o tamanho).`,
+    );
+  }
+  const duracao = Number(video.duration ?? 0); // documento não traz a duração: 0 = desconhecida
+  if (duracao > 0 && duracao < 3) {
+    return enviar(chat_id, "O Instagram exige vídeo de pelo menos 3 segundos.");
+  }
+  const dica = msg.caption?.trim() || null;
+
+  trace("video_recebido", `${video.file_size ?? "?"} bytes, ${duracao || "?"} s`, chat_id);
+  const recebiId = idDe(await enviar(chat_id, "Recebi o vídeo, processando..."));
+  let bytes: Uint8Array;
+  try {
+    bytes = await baixarArquivoTelegram(video.file_id);
+  } catch (e) {
+    // Arquivo acima de 20 MB sem file_size informado cai aqui ("file is too big").
+    trace("video_download_falhou", (e as Error).message, chat_id);
+    return enviar(chat_id, "Não consegui baixar o vídeo. Se ele passa de 20 MB, envie um vídeo menor.");
+  }
+  trace("video_baixado", `${bytes.length} bytes`, chat_id);
+
+  const caminho = `${pastaDoDia()}/${crypto.randomUUID()}.mp4`;
+  const up = await db.storage.from("fotos").upload(caminho, bytes, { contentType: "video/mp4" });
+  if (up.error) throw up.error;
+  trace("video_no_storage", caminho, chat_id);
+
+  // Capa (miniatura JPEG pequena). "thumb" é o nome antigo do campo na API do Telegram.
+  const capaId: string | null = (video.thumbnail ?? video.thumb)?.file_id ?? null;
+  const capa = await baixarCapa(capaId);
+
+  const { data: post, error } = await db.from("posts").insert({
+    chat_id,
+    tipo: "REELS",
+    telegram_file_ids: [video.file_id],
+    storage_paths: [caminho],
+    capa_file_id: capaId,
+    dica,
+    mensagens: [msg.message_id, recebiId].filter((x) => typeof x === "number"),
+  }).select("id").single();
+  if (error) throw error;
+
+  const legenda = await gerarLegenda(capa, dica);
+  await db.from("posts").update({ legenda, atualizado_em: new Date().toISOString() }).eq("id", post.id);
+
+  const aviso = [
+    !capa ? "O vídeo veio sem capa, então usei uma legenda simples. Use Definir legenda manualmente para trocar." : "",
+    legendaFallback ? "O Gemini não respondeu, então usei uma legenda simples. Toque em Regerar legenda para tentar de novo." : "",
+    duracao > 60 ? `Story de vídeo aceita até 60 s e este tem ${duracao} s: como Story, o Instagram deve recusar.` : "",
+  ].filter(Boolean).join("\n");
+  const previa = await enviar(chat_id, `${aviso ? aviso + "\n\n" : ""}Vídeo pronto. Prévia da legenda do Reel:\n\n${legenda}`, {
+    reply_markup: teclado(post.id, "video"),
+  });
+  await lembrar([idDe(previa)], { postId: post.id });
+  trace("previa_enviada", post.id, chat_id);
+}
+
+/** Baixa a capa do vídeo (JPEG). Devolve null se não houver ou se falhar: a legenda cai no plano simples. */
+async function baixarCapa(capaId: string | null): Promise<Uint8Array | null> {
+  if (!capaId) return null;
+  try {
+    const b = await baixarArquivoTelegram(capaId);
+    return detectarFormato(b) === "jpeg" ? b : null;
+  } catch {
+    return null;
+  }
+}
+
+/** Bytes da foto para a IA: a cópia ajustada do Storage (sempre JPEG); se não der, o original do Telegram. */
+// deno-lint-ignore no-explicit-any
+async function bytesParaLegenda(post: any): Promise<Uint8Array | null> {
+  if (midiaDoPost(post) === "video") return baixarCapa(post.capa_file_id ?? null);
+  const { data } = await db.storage.from("fotos").download(post.storage_paths[0]);
+  if (data) return new Uint8Array(await data.arrayBuffer());
+  const b = await baixarArquivoTelegram(post.telegram_file_ids[0]);
+  return detectarFormato(b) === "jpeg" ? b : null;
+}
+
+/**
+ * Publica agora conforme o tipo (FEED, REELS ou STORIES) e faz o pós-publicação que se aplica:
+ * resumo com link/QR/embed, contagem de hashtags e arquivamento (galeria/Drive).
+ */
+// deno-lint-ignore no-explicit-any
+async function publicarAgora(chat_id: number, post: any, tipo: TipoPost) {
+  const postId: string = post.id;
+  // Trava: só sai de rascunho uma vez (dois toques rápidos não publicam duas vezes).
+  const { data: travou } = await db.from("posts").update({
+    status: "publicando",
+    tipo,
+    aguardando_horario: false,
+    aguardando_legenda: false,
+    atualizado_em: new Date().toISOString(),
+  }).eq("id", postId).eq("status", "rascunho").select("id").maybeSingle();
+  if (!travou) return enviar(chat_id, "Este post já não está como rascunho.");
+
+  const ehVideo = midiaDoPost(post) === "video";
+  await enviar(
+    chat_id,
+    tipo === "STORIES"
+      ? `Publicando o Story...${ehVideo ? " O Instagram processa o vídeo: pode levar até 1 minuto e meio." : ""}\nStory não tem legenda: a legenda da prévia não vai junto.`
+      : tipo === "REELS"
+      ? "Publicando o Reel... O Instagram processa o vídeo: pode levar até 1 minuto e meio."
+      : "Publicando no Instagram...",
+  );
+  try {
+    const urls = post.storage_paths.map(
+      (p: string) => db.storage.from("fotos").getPublicUrl(p).data.publicUrl,
+    );
+    const igId = await publicarPorTipo(tipo, urls, post.storage_paths, post.legenda ?? "");
+    await db.from("posts").update({
+      status: "publicado",
+      ig_media_id: igId,
+      atualizado_em: new Date().toISOString(),
+    }).eq("id", postId);
+
+    if (tipo === "STORIES") {
+      // Story some em 24 h e não tem permalink fixo nem hashtags: pula resumo, hashtags e galeria.
+      // O arquivo sai do Storage `fotos` para poupar espaço (o Instagram já processou a mídia).
+      await enviar(chat_id, "Story publicado no Instagram. Ele fica no ar por 24 horas.");
+      if (post.storage_paths?.length) await db.storage.from("fotos").remove(post.storage_paths);
+      return;
+    }
+    await enviar(chat_id, tipo === "REELS" ? "Reel publicado no Instagram." : "Publicado no Instagram.");
+    await enviarResumoPublicacao(db, chat_id, igId, postId); // link, QR code e embed
+    await db.rpc("registrar_usos_hashtags", { p_post_id: postId }); // conta o uso de cada hashtag
+    // arquivarPostNoDrive só trata JPEG: o vídeo do Reel fica no Storage `fotos` por enquanto (sem galeria/Drive).
+    if (tipo === "FEED") await arquivarPostNoDrive(db, post);
+  } catch (e) {
+    await db.from("posts").update({
+      status: "erro",
+      erro_msg: (e as Error).message,
+      atualizado_em: new Date().toISOString(),
+    }).eq("id", postId);
+    return enviar(chat_id, `Falha ao publicar: ${(e as Error).message}`);
+  }
+}
+
+// deno-lint-ignore no-explicit-any
 async function tratarBotao(cb: any) {
   const chat_id: number = cb.message.chat.id;
   const [acao, postId, extra] = String(cb.data).split(":");
@@ -394,12 +604,19 @@ async function tratarBotao(cb: any) {
     return;
   }
 
+  const midia = midiaDoPost(post);
+
   if (acao === "regerar") {
-    const bytes = await baixarArquivoTelegram(post.telegram_file_ids[0]);
+    // Foto: a cópia ajustada do Storage (JPEG). Vídeo: a capa que o Telegram mandou.
+    const bytes = await bytesParaLegenda(post);
     const legenda = await gerarLegenda(bytes, post.dica);
     await db.from("posts").update({ legenda, atualizado_em: new Date().toISOString() }).eq("id", postId);
-    const nota = legendaFallback ? "O Gemini não respondeu, então voltei à legenda simples. Tente Regerar de novo.\n\n" : "";
-    const r = await enviar(chat_id, `${nota}Nova legenda:\n\n${legenda}`, { reply_markup: teclado(postId) });
+    const nota = !bytes
+      ? "Sem imagem para a IA (o vídeo veio sem capa), então usei a legenda simples.\n\n"
+      : legendaFallback
+      ? "O Gemini não respondeu, então voltei à legenda simples. Tente Regerar de novo.\n\n"
+      : "";
+    const r = await enviar(chat_id, `${nota}Nova legenda:\n\n${legenda}`, { reply_markup: teclado(postId, midia) });
     return lembrar([idDe(r)], { postId });
   }
 
@@ -409,7 +626,7 @@ async function tratarBotao(cb: any) {
     if (!tags?.length) return enviar(chat_id, "Esta legenda não tem hashtags para manter.");
     const legenda = [...new Set(tags)].join(" ");
     await db.from("posts").update({ legenda, atualizado_em: new Date().toISOString() }).eq("id", postId);
-    return editar(chat_id, cb.message.message_id, `Legenda só com hashtags:\n\n${legenda}`, teclado(postId));
+    return editar(chat_id, cb.message.message_id, `Legenda só com hashtags:\n\n${legenda}`, teclado(postId, midia));
   }
 
   if (acao === "manual") {
@@ -424,53 +641,50 @@ async function tratarBotao(cb: any) {
     return lembrar([idDe(r)], { postId });
   }
 
-  if (acao === "agora") {
-    await db.from("posts").update({ status: "publicando", atualizado_em: new Date().toISOString() }).eq("id", postId);
-    await enviar(chat_id, "Publicando no Instagram...");
-    try {
-      const urls = post.storage_paths.map(
-        (p: string) => db.storage.from("fotos").getPublicUrl(p).data.publicUrl,
-      );
-      const igId = await publicarNoInstagram(urls, post.legenda);
-      await db.from("posts").update({
-        status: "publicado",
-        ig_media_id: igId,
-        atualizado_em: new Date().toISOString(),
-      }).eq("id", postId);
-      await enviar(chat_id, "Publicado no Instagram.");
-      await enviarResumoPublicacao(db, chat_id, igId, postId); // link, QR code e embed
-      await db.rpc("registrar_usos_hashtags", { p_post_id: postId }); // conta o uso de cada hashtag
-      await arquivarPostNoDrive(db, post);
-      return;
-    } catch (e) {
-      await db.from("posts").update({
-        status: "erro",
-        erro_msg: (e as Error).message,
-        atualizado_em: new Date().toISOString(),
-      }).eq("id", postId);
-      return enviar(chat_id, `Falha ao publicar: ${(e as Error).message}`);
-    }
+  // Postar agora: foto/carrossel vai para o feed; vídeo vira Reel (teclado antigo de vídeo não existe, mas por garantia).
+  if (acao === "agora" || acao === "reel") {
+    if (acao === "reel" && midia !== "video") return enviar(chat_id, "Reel precisa de um vídeo.");
+    return publicarAgora(chat_id, post, midia === "video" ? "REELS" : "FEED");
   }
 
-  if (acao === "agendar") {
+  if (acao === "story") {
+    if (midia === "carrossel") return enviar(chat_id, "Carrossel não vira Story. Envie uma foto só.");
+    return publicarAgora(chat_id, post, "STORIES");
+  }
+
+  if (acao === "agendar" || acao === "agendarstory") {
+    // O tipo fica gravado agora: Agendar = Feed (foto) ou Reel (vídeo); Agendar Story = Story.
+    if (acao === "agendarstory" && midia === "carrossel") {
+      return enviar(chat_id, "Carrossel não vira Story. Envie uma foto só.");
+    }
+    const tipo: TipoPost = acao === "agendarstory" ? "STORIES" : midia === "video" ? "REELS" : "FEED";
     // Só um post por vez espera horário: limpa a marca dos outros e marca este.
     await db.from("posts").update({ aguardando_horario: false, aguardando_legenda: false })
       .eq("chat_id", chat_id).or("aguardando_horario.eq.true,aguardando_legenda.eq.true");
-    await db.from("posts").update({ aguardando_horario: true, atualizado_em: new Date().toISOString() }).eq("id", postId);
+    await db.from("posts").update({ aguardando_horario: true, tipo, atualizado_em: new Date().toISOString() })
+      .eq("id", postId);
     const agora = new Date();
     const botao = (rotulo: string, d: Date) => ({
       text: `${rotulo} (${formatarHorario(d)})`,
       callback_data: `hora:${postId}:${Math.floor(d.getTime() / 1000)}`, // epoch em segundos: cabe nos 64 bytes
     });
+    // Melhores horários calculados com o alcance dos seus posts (vazio enquanto não houver dados suficientes).
+    const sugeridos = await proximosHorariosSugeridos(db, agora).catch(() => [] as Date[]);
     const hoje19 = horaPronta(agora, 0, 19);
-    const opcoes = [
-      ...(hoje19.getTime() > agora.getTime() ? [[botao("Hoje 19h", hoje19)]] : []),
-      [botao("Amanhã 12h", horaPronta(agora, 1, 12))],
-      [botao("Amanhã 19h", horaPronta(agora, 1, 19))],
-    ];
+    const opcoes = sugeridos.length
+      ? [
+        ...sugeridos.map((d) => [botao("Melhor horário", d)]),
+        [botao("Amanhã 19h", horaPronta(agora, 1, 19))],
+      ]
+      : [
+        ...(hoje19.getTime() > agora.getTime() ? [[botao("Hoje 19h", hoje19)]] : []),
+        [botao("Amanhã 12h", horaPronta(agora, 1, 12))],
+        [botao("Amanhã 19h", horaPronta(agora, 1, 19))],
+      ];
+    const rotuloTipo = tipo === "STORIES" ? "o Story" : tipo === "REELS" ? "o Reel" : "o post";
     const r = await enviar(
       chat_id,
-      "Escolha um horário ou escreva o seu (ex.: amanhã 18:30, hoje 21h, 25/12 10:00).",
+      `Quando publicar ${rotuloTipo}? Escolha um horário ou escreva o seu (ex.: amanhã 18:30, hoje 21h, 25/12 10:00).`,
       { reply_markup: { inline_keyboard: opcoes } },
     );
     return lembrar([idDe(r)], { postId });
@@ -495,9 +709,14 @@ async function confirmarAgendamento(chat_id: number, postId: string, quando: Dat
     agendado_para: quando.toISOString(),
     aguardando_horario: false,
     atualizado_em: new Date().toISOString(),
-  }).eq("id", postId).eq("status", "rascunho").select("id").maybeSingle();
+  }).eq("id", postId).eq("status", "rascunho").select("id,tipo").maybeSingle();
   if (!data) return enviar(chat_id, "Não consegui agendar: o post não está mais como rascunho.");
-  return enviar(chat_id, `Agendado para ${formatarHorario(quando)} (horário de Brasília).`, {
+  const oque = data.tipo === "STORIES"
+    ? "Story agendado (Story não tem legenda: a legenda da prévia não vai junto)"
+    : data.tipo === "REELS"
+    ? "Reel agendado"
+    : "Agendado";
+  return enviar(chat_id, `${oque} para ${formatarHorario(quando)} (horário de Brasília).`, {
     reply_markup: { inline_keyboard: [[{ text: "Cancelar agendamento", callback_data: `cancelagenda:${postId}` }]] },
   });
 }
@@ -558,7 +777,8 @@ const tecladoMenu = {
       { text: "Agendados", callback_data: "menu:agendados" },
       { text: "Com erro", callback_data: "menu:erros" },
     ],
-    [{ text: "Hashtags", callback_data: "menu:hashtags" }, { text: "Limpar chat", callback_data: "menu:limpar" }],
+    [{ text: "Estatísticas", callback_data: "menu:stats" }, { text: "Hashtags", callback_data: "menu:hashtags" }],
+    [{ text: "Limpar chat", callback_data: "menu:limpar" }],
     [{ text: "Sincronizar com o Instagram", callback_data: "menu:sync" }],
     [{ text: "Fechar", callback_data: "menu:fechar" }],
   ],
@@ -681,6 +901,9 @@ async function tratarMenu(cb: any, sub: string) {
       return editar(chat_id, message_id, `Não consegui sincronizar: ${(e as Error).message}`, { inline_keyboard: [voltar] });
     }
   }
+  if (sub === "stats") {
+    return editar(chat_id, message_id, await textoStats(db), { inline_keyboard: [voltar] });
+  }
   if (sub === "hashtags") {
     return editar(chat_id, message_id, await textoHashtags(), { inline_keyboard: [voltar] });
   }
@@ -703,8 +926,16 @@ async function tratarMenu(cb: any, sub: string) {
   }
 }
 
+/** Resumo curto do post nas listas do /menu: "Reel", "Story (vídeo)", "3 foto(s)". */
+function descreverPost(p: { tipo?: string | null; storage_paths: string[] }): string {
+  const video = ehVideoPath(p.storage_paths[0]);
+  if (p.tipo === "REELS") return "Reel";
+  if (p.tipo === "STORIES") return video ? "Story (vídeo)" : "Story (foto)";
+  return `${p.storage_paths.length} foto(s)`;
+}
+
 async function mostrarAgendados(chat_id: number, message_id: number) {
-  const { data } = await db.from("posts").select("id,legenda,agendado_para,storage_paths")
+  const { data } = await db.from("posts").select("id,legenda,agendado_para,storage_paths,tipo")
     .eq("chat_id", chat_id).eq("status", "agendado")
     .order("agendado_para", { ascending: true }).limit(10);
   if (!data?.length) {
@@ -712,7 +943,7 @@ async function mostrarAgendados(chat_id: number, message_id: number) {
   }
   const quando = (p: { agendado_para: string }) => formatarHorario(new Date(p.agendado_para));
   const linhas = data.map((p, i) =>
-    `${i + 1}. ${quando(p)} · ${p.storage_paths.length} foto(s)\n   ${(p.legenda ?? "").split("\n")[0].slice(0, 60)}`
+    `${i + 1}. ${quando(p)} · ${descreverPost(p)}\n   ${p.tipo === "STORIES" ? "(Story, sem legenda)" : (p.legenda ?? "").split("\n")[0].slice(0, 60)}`
   );
   const botoes = data.map((p, i) => [{ text: `Cancelar ${i + 1} (${quando(p)})`, callback_data: `cancelagenda:${p.id}` }]);
   botoes.push(voltar);
@@ -720,14 +951,14 @@ async function mostrarAgendados(chat_id: number, message_id: number) {
 }
 
 async function mostrarErros(chat_id: number, message_id: number) {
-  const { data } = await db.from("posts").select("id,erro_msg,atualizado_em,storage_paths")
+  const { data } = await db.from("posts").select("id,erro_msg,atualizado_em,storage_paths,tipo")
     .eq("chat_id", chat_id).eq("status", "erro")
     .order("atualizado_em", { ascending: false }).limit(8);
   if (!data?.length) {
     return editar(chat_id, message_id, "Posts com erro:\n\nNenhum post com erro.", { inline_keyboard: [voltar] });
   }
   const linhas = data.map((p, i) =>
-    `${i + 1}. ${formatarHorario(new Date(p.atualizado_em))} · ${p.storage_paths.length} foto(s)\n   ${(p.erro_msg ?? "sem detalhe").slice(0, 110)}`
+    `${i + 1}. ${formatarHorario(new Date(p.atualizado_em))} · ${descreverPost(p)}\n   ${(p.erro_msg ?? "sem detalhe").slice(0, 110)}`
   );
   const botoes = data.map((p, i) => [
     { text: `Tentar de novo ${i + 1}`, callback_data: `retentar:${p.id}` },
@@ -790,7 +1021,7 @@ async function descartarPost(cb: any, postId: string) {
 
 /** Texto livre do dono: se há um post esperando legenda manual, o texto vira a legenda. Devolve false se não há. */
 async function tratarLegendaTexto(chat_id: number, texto: string, msgId?: number): Promise<boolean> {
-  const { data: post } = await db.from("posts").select("id,legenda")
+  const { data: post } = await db.from("posts").select("id,legenda,storage_paths")
     .eq("chat_id", chat_id).eq("status", "rascunho").eq("aguardando_legenda", true)
     .order("atualizado_em", { ascending: false }).limit(1).maybeSingle();
   if (!post) return false;
@@ -807,7 +1038,7 @@ async function tratarLegendaTexto(chat_id: number, texto: string, msgId?: number
     aguardando_legenda: false,
     atualizado_em: new Date().toISOString(),
   }).eq("id", post.id);
-  const r = await enviar(chat_id, `Legenda definida:\n\n${legenda}`, { reply_markup: teclado(post.id) });
+  const r = await enviar(chat_id, `Legenda definida:\n\n${legenda}`, { reply_markup: teclado(post.id, midiaDoPost(post)) });
   await lembrar([msgId, idDe(r)], { postId: post.id });
   return true;
 }
@@ -866,13 +1097,15 @@ async function processarUpdate(update: any) {
     } else if (/^(\/menu|menu)$/i.test(msg?.text?.trim() ?? "")) {
       // Vale para o comando /menu e para o botão fixo "Menu".
       await enviar(chat_id!, TEXTO_MENU, { reply_markup: tecladoMenu });
+    } else if (/^\/stats/i.test(msg?.text?.trim() ?? "")) {
+      await enviar(chat_id!, await textoStats(db));
     } else if (/^\/hashtags/i.test(msg?.text?.trim() ?? "")) {
       await mostrarHashtags(chat_id!);
     } else if (/^criar postagem$/i.test(msg?.text?.trim() ?? "")) {
       // O Telegram não deixa o bot abrir o seletor de arquivos: a mensagem orienta o próximo passo.
       await enviar(
         chat_id!,
-        "Envie a foto agora (use o clipe ao lado do campo de texto). Para carrossel, envie várias de uma vez. Se quiser, escreva uma dica na legenda da foto.",
+        "Envie a foto ou o vídeo agora (use o clipe ao lado do campo de texto). Para carrossel, envie várias fotos de uma vez. Vídeo vira Reel (até 20 MB). Se quiser, escreva uma dica na legenda.",
       );
     } else if (msg?.text?.trim().startsWith("/contexto")) {
       // /contexto mostra o texto atual; /contexto <texto> troca por um novo.
@@ -899,6 +1132,9 @@ async function processarUpdate(update: any) {
       await enviar(chat_id!, "Chat limpo.", { reply_markup: tecladoFixo });
     } else if (cb) {
       await tratarBotao(cb);
+    } else if (msg?.video || String(msg?.document?.mime_type ?? "").startsWith("video/")) {
+      // Vídeo normal ou enviado como arquivo: vira rascunho de Reel (tratarVideo recusa o que não é MP4).
+      await tratarVideo(msg);
     } else if (msg?.photo || msg?.document) {
       await tratarFoto(msg);
     } else if (msg?.text) {
