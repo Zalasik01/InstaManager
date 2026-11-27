@@ -1,4 +1,7 @@
 @import "tailwindcss";
+/* Estilos das libs como arquivo (a CSP do site bloqueia o <style> que elas injetariam sozinhas). */
+@import "sonner/dist/styles.css";
+@import "react-zoom-pan-pinch/dist/styles.css";
 
 /* Nunito Sans variável, auto-hospedada (pacote @fontsource-variable/nunito-sans).
    Só os subsets latin e latin-ext: cobrem todo o português. Sem Google Fonts. */
@@ -43,36 +46,69 @@
 @layer base {
   :root {
     color-scheme: dark;
+    /* Atalhos curtos usados pelas regras portadas do site antigo (site/public/style.css). */
+    --bg: var(--color-bg);
+    --surface: var(--color-surface);
+    --fg: var(--color-fg);
+    --muted: var(--color-muted);
+    --line: var(--color-line);
+    --accent: var(--color-accent);
+    --accent-fg: var(--color-accent-fg);
   }
 
   html {
-    background-color: var(--color-bg);
-    color: var(--color-fg);
+    background-color: var(--bg);
+    color: var(--fg);
     font-family: var(--font-sans);
     -webkit-text-size-adjust: 100%;
     text-size-adjust: 100%;
+    -webkit-tap-highlight-color: rgba(232, 184, 74, 0.18);
   }
 
   body {
+    margin: 0;
+    min-height: 100vh;
     min-height: 100dvh;
-    background-color: var(--color-bg);
+    display: flex;
+    flex-direction: column;
+    background-color: var(--bg);
+    color: var(--fg);
+    line-height: 1.55;
+    overscroll-behavior-y: none;
     /* Área segura em celulares com entalhe e barra de gestos (viewport-fit=cover). */
-    padding-inline: env(safe-area-inset-left) env(safe-area-inset-right);
-    padding-bottom: env(safe-area-inset-bottom);
+    padding: env(safe-area-inset-top) env(safe-area-inset-right) env(safe-area-inset-bottom)
+      env(safe-area-inset-left);
   }
 
   a {
+    color: var(--accent);
     text-underline-offset: 3px;
+    touch-action: manipulation;
+  }
+  a:hover {
+    color: var(--fg);
+  }
+
+  button {
+    cursor: pointer;
+    touch-action: manipulation;
+  }
+  button:disabled {
+    cursor: default;
   }
 
   :focus-visible {
-    outline: 2px solid var(--color-accent);
-    outline-offset: 2px;
+    outline: 2px solid var(--accent);
+    outline-offset: 3px;
   }
 
   ::selection {
-    background-color: var(--color-accent);
-    color: var(--color-accent-fg);
+    background-color: var(--accent);
+    color: var(--accent-fg);
+  }
+
+  [hidden] {
+    display: none !important;
   }
 
   @media (prefers-reduced-motion: reduce) {
@@ -80,44 +116,1452 @@
     *::before,
     *::after {
       animation-duration: 0.01ms !important;
+      animation-iteration-count: 1 !important;
       transition-duration: 0.01ms !important;
       scroll-behavior: auto !important;
     }
   }
 }
 
-/* Texto jurídico (Markdown renderizado em /privacidade e /termos). */
+/* Componentes portados de site/public/style.css e extra.css (a referência aprovada pelo dono).
+   Os nomes de classe são os mesmos para facilitar a comparação lado a lado. */
 @layer components {
-  .prose-doc h1 {
-    font-size: 1.875rem;
-    font-weight: 800;
-    margin-bottom: 0.5rem;
+  .skip {
+    position: absolute;
+    left: 0.5rem;
+    top: -4rem;
+    background: var(--accent);
+    color: var(--accent-fg);
+    padding: 0.6rem 1rem;
+    z-index: 100;
+    font-weight: 700;
   }
-  .prose-doc h2 {
-    font-size: 1.25rem;
+  .skip:focus {
+    top: 0.5rem;
+  }
+
+  .wrap {
+    width: 100%;
+    max-width: 62rem;
+    margin: 0 auto;
+    padding: 0 1rem;
+  }
+
+  /* ---------- barra do topo ---------- */
+  .bar {
+    border-bottom: 1px solid var(--line);
+  }
+  .bar .wrap {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    height: 3.5rem;
+  }
+  .brand {
+    display: inline-flex;
+    align-items: center;
+    min-height: 44px;
+    color: var(--fg);
+    text-decoration: none;
     font-weight: 800;
+    font-size: 1.05rem;
+    letter-spacing: 0.02em;
+  }
+  .brand span {
+    color: var(--accent);
+  }
+  .bar nav {
+    display: flex;
+    align-items: center;
+    gap: 0.25rem;
+  }
+  .bar nav a,
+  .bar nav button {
+    color: var(--muted);
+    font-size: 0.9rem;
+    text-decoration: none;
+    display: inline-flex;
+    align-items: center;
+    min-height: 44px;
+    padding: 0 0.6rem;
+    background: none;
+    border: 0;
+  }
+  .bar nav button {
+    color: var(--accent);
+    font-weight: 700;
+  }
+  .bar nav a:hover,
+  .bar nav button:hover {
+    color: var(--fg);
+  }
+  main {
+    flex: 1;
+    width: 100%;
+  }
+
+  /* ---------- perfil ---------- */
+  .profile {
+    display: grid;
+    grid-template-columns: auto 1fr;
+    gap: 1rem 1.25rem;
+    align-items: center;
+    padding: 1.5rem 0 0;
+  }
+  .avatar {
+    width: 5rem;
+    height: 5rem;
+    border-radius: 50%;
+    object-fit: cover;
+    aspect-ratio: 1;
+    border: 2px solid var(--accent);
+    padding: 3px;
+    background: var(--bg);
+    max-width: none;
+  }
+  .handle {
+    margin: 0;
+    font-size: 1.1rem;
+    font-weight: 800;
+    line-height: 1.2;
+    overflow-wrap: anywhere;
+  }
+  .follow {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    min-height: 50px;
+    padding: 0 1.5rem;
+    background: var(--accent);
+    color: var(--accent-fg);
+    font-weight: 800;
+    font-size: 1rem;
+    text-decoration: none;
+    border-radius: 8px;
+    white-space: nowrap;
+    transition:
+      background-color 0.15s ease,
+      color 0.15s ease;
+  }
+  .follow:hover {
+    background: var(--fg);
+    color: var(--bg);
+  }
+  /* Seguir e Compartilhar sempre na mesma linha; Seguir é maior e ocupa o espaço que sobra. */
+  .actions {
+    display: flex;
+    flex-wrap: nowrap;
+    align-items: stretch;
+    gap: 0.6rem;
+    margin-top: 0.6rem;
+  }
+  .actions .follow {
+    flex: 1 1 auto;
+    min-width: 0;
+  }
+  .actions .share {
+    flex: 0 0 auto;
+    min-height: 50px;
+    border-radius: 8px;
+    white-space: nowrap;
+  }
+  /* No celular a linha dos botões ocupa a largura toda, abaixo do avatar e do @. */
+  .profile-main {
+    display: contents;
+  }
+  .profile-main .actions {
+    grid-column: 1 / -1;
+  }
+  .share {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.4rem;
+    min-height: 44px;
+    padding: 0 1rem;
+    background: transparent;
+    border: 1px solid var(--line);
+    color: var(--fg);
+    font-weight: 700;
+    font-size: 0.9rem;
+    border-radius: 6px;
+    transition: border-color 0.15s ease;
+  }
+  .share:hover {
+    border-color: var(--accent);
+  }
+  .share svg {
+    width: 1.1rem;
+    height: 1.1rem;
+  }
+  .bio {
+    grid-column: 1 / -1;
+    margin: 0;
+  }
+  .bio strong {
+    display: block;
+  }
+  .bio span {
+    color: var(--muted);
+  }
+  /* aviso de post novo (Web Push): botão discreto abaixo da bio */
+  .push {
+    grid-column: 1 / -1;
+    margin: -0.25rem 0 0;
+  }
+  .push-btn {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.4rem;
+    min-height: 44px;
+    padding: 0 0.2rem;
+    background: none;
+    border: 0;
+    color: var(--muted);
+    font-size: 0.85rem;
+    font-weight: 600;
+  }
+  .push-btn svg {
+    width: 1rem;
+    height: 1rem;
+  }
+  .push-btn:hover {
+    color: var(--fg);
+  }
+  .push-btn[aria-pressed="true"] {
+    color: var(--accent);
+  }
+  .push-btn:disabled {
+    opacity: 0.6;
+    cursor: progress;
+  }
+  .push-dica {
+    margin: 0 0 0.2rem;
+    color: var(--muted);
+    font-size: 0.8rem;
+  }
+  .stats {
+    grid-column: 1 / -1;
+    list-style: none;
+    margin: 0;
+    padding: 0.9rem 0;
+    display: flex;
+    justify-content: space-around;
+    border-top: 1px solid var(--line);
+  }
+  .stats li {
+    text-align: center;
+  }
+  .stats b {
+    display: block;
+    font-size: 1.05rem;
+    font-weight: 800;
+    font-variant-numeric: tabular-nums;
+  }
+  .stats span {
+    color: var(--muted);
+    font-size: 0.78rem;
+  }
+
+  /* ---------- abas ---------- */
+  .tabs {
+    display: flex;
+    border-top: 1px solid var(--line);
+    margin: 1.25rem -1rem 0;
+  }
+  .tabs button {
+    position: relative;
+    flex: 1;
+    background: none;
+    border: 0;
+    margin-top: -1px;
+    padding: 0.85rem 0.5rem;
+    min-height: 48px;
+    color: var(--muted);
+    font-weight: 800;
+    font-size: 0.75rem;
+    letter-spacing: 0.12em;
+    text-transform: uppercase;
+    transition: color 0.15s ease;
+  }
+  .tabs button:hover {
+    color: var(--fg);
+  }
+  .tabs button[data-state="active"] {
+    color: var(--fg);
+  }
+  /* Indicador da aba ativa: um só elemento que desliza entre as abas (layoutId do motion). */
+  .tab-ind {
+    position: absolute;
+    left: 0;
+    right: 0;
+    top: 0;
+    height: 2px;
+    background: var(--accent);
+  }
+  .panel {
+    padding: 0 0 3rem;
+  }
+  .panel:focus-visible {
+    outline-offset: -2px;
+  }
+
+  /* ---------- grade ---------- */
+  /* minmax(0, 1fr) + min-width: 0: o conteúdo de um card nunca alarga a coluna além de 1/3 do container. */
+  .grid-posts {
+    list-style: none;
+    margin: 0 -1rem;
+    padding: 0;
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 2px;
+  }
+  .grid-posts > li {
+    position: relative;
+    min-width: 0;
+    aspect-ratio: 4 / 5;
+    background: var(--surface);
+  }
+  .tile {
+    display: block;
+    width: 100%;
+    height: 100%;
+    padding: 0;
+    border: 0;
+    position: relative;
+    overflow: hidden;
+    background: var(--surface);
+    touch-action: manipulation;
+    -webkit-touch-callout: none;
+  }
+  .tile img {
+    position: absolute;
+    inset: 0;
+    width: 100%;
+    height: 100%;
+    max-width: none;
+    object-fit: contain;
+    display: block;
+  }
+  /* Foto inteira (sem corte) sobre ela mesma desfocada, para preencher o que sobra do 4:5. */
+  .tile img.bg {
+    object-fit: cover;
+    filter: blur(28px) saturate(1.35) brightness(0.72);
+    transform: scale(1.5);
+  }
+  .tile img.fg {
+    transition: transform 0.6s cubic-bezier(0.2, 0.7, 0.2, 1);
+  }
+  .tile:focus-visible {
+    outline-offset: -4px;
+  }
+  .tile .multi {
+    position: absolute;
+    top: 0.4rem;
+    right: 0.4rem;
+    width: 1.25rem;
+    height: 1.25rem;
+    color: #fff;
+    filter: drop-shadow(0 0 2px rgba(0, 0, 0, 0.8));
+  }
+  .tile .fixo {
+    position: absolute;
+    top: 0.4rem;
+    left: 0.4rem;
+    width: 1.15rem;
+    height: 1.15rem;
+    color: #fff;
+    transform: rotate(45deg);
+    filter: drop-shadow(0 0 2px rgba(0, 0, 0, 0.85));
+  }
+  .tile .views {
+    position: absolute;
+    left: 0.4rem;
+    bottom: 0.35rem;
+    z-index: 1;
+    display: inline-flex;
+    align-items: center;
+    gap: 0.25rem;
+    color: #fff;
+    font-size: 0.78rem;
+    font-weight: 700;
+    text-shadow: 0 1px 3px rgba(0, 0, 0, 0.9);
+    pointer-events: none;
+    font-variant-numeric: tabular-nums;
+  }
+  .tile .views svg {
+    width: 0.95rem;
+    height: 0.95rem;
+    filter: drop-shadow(0 0 2px rgba(0, 0, 0, 0.8));
+  }
+  .tile.has-views::after {
+    content: "";
+    position: absolute;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    height: 34%;
+    background: linear-gradient(to top, rgba(0, 0, 0, 0.5), transparent);
+    pointer-events: none;
+  }
+  /* Esqueleto brilhando enquanto a foto chega (no card e nos itens extras do fim da grade). */
+  .tile.carregando,
+  .skel-i {
+    background: linear-gradient(100deg, var(--surface) 30%, #242428 50%, var(--surface) 70%) 0 0 / 200%
+      100%;
+    animation: shimmer 1.4s linear infinite;
+  }
+  .skel-i {
+    aspect-ratio: 4 / 5;
+  }
+  .veil {
+    display: none;
+  }
+  @media (hover: hover) and (pointer: fine) {
+    .tile.pronto:hover img.fg {
+      transform: scale(1.04);
+    }
+    .veil {
+      position: absolute;
+      inset: 0;
+      z-index: 2;
+      display: flex;
+      flex-direction: column;
+      gap: 0.4rem;
+      padding: 0.7rem;
+      background: rgba(0, 0, 0, 0.76);
+      color: #fff;
+      opacity: 0;
+      visibility: hidden;
+      transition:
+        opacity 0.15s ease,
+        visibility 0.15s;
+      pointer-events: none;
+    }
+    .grid-posts > li:hover .veil,
+    .grid-posts > li:has(:focus-visible) .veil {
+      opacity: 1;
+      visibility: visible;
+    }
+    .veil-cap {
+      margin: 0;
+      font-size: 0.85rem;
+      line-height: 1.35;
+      display: -webkit-box;
+      -webkit-box-orient: vertical;
+      -webkit-line-clamp: 4;
+      line-clamp: 4;
+      overflow: hidden;
+      white-space: pre-line;
+      overflow-wrap: anywhere;
+    }
+    .veil-nums {
+      margin: 0;
+      font-size: 0.78rem;
+      color: #d6d6d2;
+    }
+    .veil-act {
+      margin-top: auto;
+      display: flex;
+      gap: 0.4rem;
+      pointer-events: auto;
+    }
+    .veil-act button {
+      flex: 1;
+      min-height: 44px;
+      padding: 0 0.4rem;
+      background: rgba(255, 255, 255, 0.12);
+      border: 1px solid rgba(255, 255, 255, 0.35);
+      color: #fff;
+      font-weight: 700;
+      font-size: 0.8rem;
+      border-radius: 6px;
+      transition:
+        background-color 0.15s ease,
+        color 0.15s ease;
+    }
+    .veil-act button:hover {
+      background: var(--accent);
+      border-color: var(--accent);
+      color: var(--accent-fg);
+    }
+  }
+  .status {
+    padding: 3rem 1rem;
+    text-align: center;
+    color: var(--muted);
+  }
+  .status strong {
+    display: block;
+    color: var(--fg);
+    font-size: 1.05rem;
+    margin-bottom: 0.3rem;
+  }
+  .status button,
+  .btn-contorno {
+    margin-top: 1rem;
+    padding: 0.65rem 1.3rem;
+    min-height: 44px;
+    background: transparent;
+    border: 1px solid var(--accent);
+    color: var(--accent);
+    font-weight: 700;
+    border-radius: 6px;
+    transition:
+      background-color 0.15s ease,
+      color 0.15s ease;
+  }
+  .status button:hover,
+  .btn-contorno:hover {
+    background: var(--accent);
+    color: var(--accent-fg);
+  }
+  .sentinela {
+    height: 1px;
+  }
+
+  /* ---------- ficha do carro ---------- */
+  .car {
+    padding-top: 1.25rem;
+    max-width: 46rem;
+    margin: 0 auto;
+  }
+  .car-head {
+    padding: 0.5rem 0 0;
+  }
+  .car-eyebrow {
+    margin: 0 0 0.35rem;
+    color: var(--muted);
+    font-size: 0.72rem;
+    font-weight: 700;
+    letter-spacing: 0.18em;
+    text-transform: uppercase;
+  }
+  .car-name {
+    margin: 0;
+    font-size: clamp(1.75rem, 6vw, 2.5rem);
+    line-height: 1.05;
+    letter-spacing: -0.02em;
+    font-weight: 800;
+    overflow-wrap: anywhere;
+    text-wrap: balance;
+  }
+  .car-hl {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 1.25rem 1rem;
+    margin: 1.5rem 0 0;
+    padding: 1.25rem 0;
+    border-top: 1px solid var(--line);
+    border-bottom: 1px solid var(--line);
+  }
+  .car-hl > div:last-child:nth-child(odd) {
+    grid-column: 1 / -1;
+  }
+  .car-hl dt,
+  .car-list dt {
+    color: var(--muted);
+    font-size: 0.7rem;
+    font-weight: 700;
+    letter-spacing: 0.14em;
+    text-transform: uppercase;
+  }
+  .car-hl dd {
+    margin: 0.3rem 0 0;
+    font-size: clamp(1.05rem, 4.2vw, 1.3rem);
+    line-height: 1.2;
+    font-weight: 800;
+    overflow-wrap: anywhere;
+    text-wrap: balance;
+  }
+  .car-sec {
     margin-top: 2rem;
-    margin-bottom: 0.5rem;
   }
-  .prose-doc p,
-  .prose-doc ul {
-    color: var(--color-fg);
-    line-height: 1.7;
-    margin-top: 0.75rem;
+  .car-sec h2 {
+    margin: 0 0 0.8rem;
+    font-size: 0.72rem;
+    font-weight: 800;
+    letter-spacing: 0.16em;
+    text-transform: uppercase;
+    color: var(--accent);
   }
-  .prose-doc ul {
-    list-style: disc;
-    padding-left: 1.25rem;
+  .car-list {
+    margin: 0;
+    display: grid;
+    grid-template-columns: minmax(0, 1fr);
+    gap: 1.1rem;
   }
-  .prose-doc li + li {
+  .car-list dd {
+    margin: 0.25rem 0 0;
+    font-size: clamp(0.95rem, 4vw, 1rem);
+    line-height: 1.35;
+    font-weight: 600;
+    overflow-wrap: anywhere;
+  }
+  .car-chips {
+    list-style: none;
+    margin: 0;
+    padding: 0;
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.5rem;
+  }
+  .car-chips li {
+    display: inline-flex;
+    align-items: center;
+    min-height: 38px;
+    padding: 0 0.95rem;
+    border: 1px solid var(--line);
+    border-radius: 999px;
+    background: var(--surface);
+    font-weight: 600;
+    font-size: 0.92rem;
+  }
+  .car-upd {
+    margin: 2.5rem 0 0;
+    color: var(--muted);
+    font-size: 0.85rem;
+  }
+  .car-erro {
+    margin: 2rem 0;
+    color: var(--muted);
+  }
+
+  /* ---------- links das peças ---------- */
+  .lk-filtro {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.5rem;
+    margin-top: 1.25rem;
+  }
+  .lk-filtro button {
+    min-height: 44px;
+    padding: 0 1rem;
+    background: var(--surface);
+    border: 1px solid var(--line);
+    border-radius: 999px;
+    font-weight: 700;
+    font-size: 0.9rem;
+    transition:
+      background-color 0.15s ease,
+      border-color 0.15s ease,
+      color 0.15s ease;
+  }
+  .lk-filtro button[aria-pressed="true"] {
+    background: var(--accent);
+    border-color: var(--accent);
+    color: var(--accent-fg);
+  }
+  .lk {
+    list-style: none;
+    margin: 0;
+    padding: 0;
+    display: grid;
+    gap: 0.6rem;
+  }
+  .lk li {
+    padding: 0.9rem 1rem;
+    background: var(--surface);
+    border: 1px solid var(--line);
+    border-radius: 10px;
+    transition: border-color 0.2s ease;
+  }
+  @media (hover: hover) and (pointer: fine) {
+    .lk li:hover {
+      border-color: var(--accent);
+    }
+  }
+  .lk-t {
+    margin: 0;
+    font-size: 1rem;
+    font-weight: 800;
+    line-height: 1.3;
+    overflow-wrap: anywhere;
+  }
+  .lk-m,
+  .lk-p {
+    margin: 0.15rem 0 0;
+    color: var(--muted);
+    font-size: 0.85rem;
+    overflow-wrap: anywhere;
+  }
+  .lk-p {
+    font-size: 0.8rem;
+  }
+  .lk-d {
+    margin: 0.4rem 0 0;
+    font-size: 0.95rem;
+    overflow-wrap: anywhere;
+  }
+  .lk-go {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.35rem;
+    min-height: 44px;
     margin-top: 0.4rem;
+    padding: 0 1rem;
+    border: 1px solid var(--accent);
+    border-radius: 6px;
+    font-weight: 700;
+    font-size: 0.9rem;
+    text-decoration: none;
+    transition:
+      background-color 0.15s ease,
+      color 0.15s ease;
   }
-  .prose-doc a {
-    color: var(--color-accent);
-    text-decoration: underline;
+  .lk-go:hover {
+    background: var(--accent);
+    color: var(--accent-fg);
   }
-  .prose-doc .atualizado {
-    color: var(--color-muted);
-    font-size: 0.875rem;
+
+  /* ---------- visualizador ---------- */
+  .viewer-bg {
+    position: fixed;
+    inset: 0;
+    z-index: 40;
+    background: rgba(0, 0, 0, 0.78);
+  }
+  @supports (backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px)) {
+    .viewer-bg {
+      background: rgba(0, 0, 0, 0.6);
+      -webkit-backdrop-filter: blur(14px);
+      backdrop-filter: blur(14px);
+    }
+  }
+  /* Proporções do próprio Instagram: a classe r-* (conforme a 1ª imagem) define a altura da mídia.
+     --hdr = altura do cabeçalho (avatar e nome); --mh = altura da imagem, limitada a 62% da tela. */
+  .viewer {
+    position: fixed;
+    inset: 0;
+    z-index: 41;
+    display: grid;
+    place-items: center;
+    color: var(--fg);
+    overflow: hidden;
+    overscroll-behavior: contain;
+    outline: none;
+    --hdr: calc(3.2rem + env(safe-area-inset-top));
+    --mh: min(125vw, 62dvh);
+  }
+  .viewer.r-45 {
+    --mh: min(125vw, 62dvh);
+  }
+  .viewer.r-11 {
+    --mh: min(100vw, 62dvh);
+  }
+  .viewer.r-43 {
+    --mh: min(75vw, 62dvh);
+  }
+  .viewer.r-191 {
+    --mh: min(52.4vw, 62dvh);
+  }
+  .icon-btn {
+    background: none;
+    border: 0;
+    width: 2.75rem;
+    height: 2.75rem;
+    display: inline-grid;
+    place-items: center;
+    border-radius: 50%;
+    color: var(--fg);
+    transition:
+      background-color 0.15s ease,
+      opacity 0.15s ease;
+  }
+  .icon-btn:hover {
+    background: var(--surface);
+  }
+  .icon-btn svg {
+    width: 1.4rem;
+    height: 1.4rem;
+  }
+  .v-x,
+  .v-post,
+  .v-arrow,
+  .z-arrow {
+    background: rgba(0, 0, 0, 0.55);
+    color: #fff;
+  }
+  .v-x:hover,
+  .v-post:hover,
+  .v-arrow:hover,
+  .z-arrow:hover {
+    background: rgba(0, 0, 0, 0.85);
+  }
+  .v-x {
+    position: fixed;
+    z-index: 5;
+    top: calc(0.2rem + env(safe-area-inset-top));
+    right: calc(0.4rem + env(safe-area-inset-right));
+    background: none;
+  }
+  .v-post {
+    position: fixed;
+    z-index: 5;
+    top: calc(var(--hdr) + var(--mh) / 2);
+    translate: 0 -50%;
+  }
+  .v-post:disabled,
+  .v-arrow:disabled,
+  .z-arrow:disabled {
+    opacity: 0.3;
+  }
+  .v-pl {
+    left: calc(0.5rem + env(safe-area-inset-left));
+  }
+  .v-pr {
+    right: calc(0.5rem + env(safe-area-inset-right));
+  }
+  .v-box {
+    display: flex;
+    flex-direction: column;
+    width: 100%;
+    height: 100vh;
+    height: 100dvh;
+    background: var(--bg);
+    overflow: hidden;
+  }
+  .v-media {
+    position: relative;
+    order: 1;
+    flex: none;
+    width: 100%;
+    background: #000;
+    height: var(--mh);
+    display: grid;
+    place-items: center;
+  }
+  /* Mídia presa à caixa (absolute + inset 0): um vídeo vertical não estoura a altura e é sempre mostrado inteiro. */
+  .v-media video {
+    position: absolute;
+    inset: 0;
+    width: 100%;
+    height: 100%;
+    max-width: none;
+    object-fit: contain;
+    display: block;
+    background: #000;
+  }
+  /* Carrossel: trilho com rolagem horizontal nativa e scroll-snap (o dedo arrasta a imagem e ela encaixa
+     sozinha, sem JS de gesto). snap-stop: always = um arrasto rápido passa só uma imagem por vez.
+     overscroll-behavior-x: contain = no fim do trilho o gesto não vira "voltar página" nem troca de post. */
+  .v-track {
+    position: absolute;
+    inset: 0;
+    display: flex;
+    overflow-x: auto;
+    overflow-y: hidden;
+    scroll-snap-type: x mandatory;
+    overscroll-behavior-x: contain;
+    scrollbar-width: none;
+    touch-action: pan-x pan-y pinch-zoom;
+    -webkit-overflow-scrolling: touch;
+  }
+  .v-track::-webkit-scrollbar {
+    display: none;
+  }
+  .v-track:focus {
+    outline: none;
+  }
+  .v-slide {
+    position: relative;
+    flex: 0 0 100%;
+    width: 100%;
+    height: 100%;
+    scroll-snap-align: center;
+    scroll-snap-stop: always;
+  }
+  .v-slide img {
+    position: absolute;
+    inset: 0;
+    width: 100%;
+    height: 100%;
+    max-width: none;
+    object-fit: contain;
+    display: block;
+    -webkit-user-drag: none;
+    user-select: none;
+  }
+  .v-arrow,
+  .z-arrow {
+    position: absolute;
+    z-index: 2;
+    top: 50%;
+    translate: 0 -50%;
+  }
+  .v-arrow {
+    display: none;
+  }
+  .v-prev {
+    left: 0.5rem;
+  }
+  .v-next {
+    right: 0.5rem;
+  }
+  .dots {
+    position: absolute;
+    bottom: 0.6rem;
+    left: 0;
+    right: 0;
+    display: flex;
+    justify-content: center;
+    gap: 0.35rem;
+    pointer-events: none;
+  }
+  .dots i {
+    width: 0.4rem;
+    height: 0.4rem;
+    border-radius: 50%;
+    background: rgba(255, 255, 255, 0.4);
+    transition:
+      background-color 0.15s ease,
+      transform 0.15s ease;
+  }
+  .dots i.on {
+    transform: scale(1.2);
+    background: var(--accent);
+  }
+  /* O painel não é uma caixa própria no celular: cabeçalho, legenda, ações e contador viram itens
+     do .v-box na ordem do Instagram (cabeçalho, imagem, legenda rolável, ações fixas). */
+  .v-info {
+    display: contents;
+  }
+  .v-top {
+    order: 0;
+    flex: none;
+    box-sizing: border-box;
+    min-height: var(--hdr);
+    display: flex;
+    align-items: center;
+    gap: 0.6rem;
+    padding: env(safe-area-inset-top) 3.4rem 0 max(1rem, env(safe-area-inset-left));
+    border-bottom: 1px solid var(--line);
+    font-size: 0.9rem;
+    font-weight: 800;
+  }
+  .v-av {
+    width: 2rem;
+    height: 2rem;
+    border-radius: 50%;
+    object-fit: cover;
+  }
+  .v-scroll {
+    order: 2;
+    flex: 1 1 auto;
+    min-height: 0;
+    overflow-y: auto;
+    overscroll-behavior: contain;
+    padding: 0.9rem max(1rem, env(safe-area-inset-right)) 0.5rem max(1rem, env(safe-area-inset-left));
+  }
+  .v-nums {
+    margin: 0 0 0.7rem;
+    font-size: 0.85rem;
+    font-weight: 800;
+  }
+  .v-cap {
+    margin: 0 0 0.9rem;
+    white-space: pre-line;
+    overflow-wrap: anywhere;
+    font-size: 0.95rem;
+  }
+  .chips {
+    list-style: none;
+    margin: 0 0 0.9rem;
+    padding: 0;
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.4rem;
+  }
+  .chips li {
+    padding: 0.15rem 0.6rem;
+    border: 1px solid var(--line);
+    border-radius: 999px;
+    font-size: 0.82rem;
+    color: var(--accent);
+  }
+  .v-date {
+    color: var(--muted);
+    font-size: 0.8rem;
+    margin: 0 0 0.5rem;
+  }
+  /* comentários do Instagram (dentro da área rolável, abaixo da legenda) */
+  .v-com {
+    margin: 0.9rem 0 0.4rem;
+    padding-top: 0.9rem;
+    border-top: 1px solid var(--line);
+  }
+  .v-com-t {
+    margin: 0 0 0.7rem;
+    font-size: 0.72rem;
+    font-weight: 800;
+    letter-spacing: 0.14em;
+    text-transform: uppercase;
+    color: var(--muted);
+  }
+  .v-com-lista {
+    list-style: none;
+    margin: 0;
+    padding: 0;
+    display: grid;
+    gap: 0.75rem;
+  }
+  .v-com-lista li {
+    font-size: 0.9rem;
+    line-height: 1.4;
+    overflow-wrap: anywhere;
+  }
+  .v-com-lista b {
+    font-weight: 800;
+    margin-right: 0.35rem;
+  }
+  .v-com-lista p {
+    margin: 0;
+    white-space: pre-line;
+  }
+  .v-com-meta {
+    display: block;
+    margin-top: 0.15rem;
+    color: var(--muted);
+    font-size: 0.75rem;
+  }
+  .v-com-vazio {
+    margin: 0;
+    color: var(--muted);
+    font-size: 0.88rem;
+  }
+  .v-com-skel {
+    height: 0.8rem;
+    border-radius: 4px;
+    background: linear-gradient(100deg, var(--surface) 30%, #242428 50%, var(--surface) 70%) 0 0 / 200%
+      100%;
+    animation: shimmer 1.4s linear infinite;
+  }
+  .v-actions {
+    order: 3;
+    flex: none;
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.5rem;
+    align-items: center;
+    padding: 0.6rem max(1rem, env(safe-area-inset-right)) 0.4rem max(1rem, env(safe-area-inset-left));
+    border-top: 1px solid var(--line);
+  }
+  .v-actions a {
+    display: inline-flex;
+    align-items: center;
+    min-height: 44px;
+    font-size: 0.9rem;
+    font-weight: 600;
+  }
+  .v-count {
+    order: 4;
+    flex: none;
+    margin: 0;
+    padding: 0 max(1rem, env(safe-area-inset-right)) calc(0.6rem + env(safe-area-inset-bottom))
+      max(1rem, env(safe-area-inset-left));
+    color: var(--muted);
+    font-size: 0.75rem;
+  }
+  @media (min-width: 640px) {
+    .v-box {
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) 23rem;
+      grid-template-rows: auto minmax(0, 1fr) auto auto;
+      width: min(calc(100vw - 9rem), 1100px);
+      height: min(88dvh, 56rem);
+      border-radius: 12px;
+    }
+    .v-box.compact {
+      grid-template-columns: minmax(0, 1fr) 16rem;
+    }
+    /* Desktop: a imagem ocupa a coluna inteira (contain); o painel fica na coluna da direita. */
+    .v-media {
+      grid-column: 1;
+      grid-row: 1 / -1;
+      width: auto;
+      height: 100%;
+    }
+    .v-top,
+    .v-scroll,
+    .v-actions,
+    .v-count {
+      grid-column: 2;
+      border-left: 1px solid var(--line);
+    }
+    .v-top {
+      grid-row: 1;
+      min-height: 3.2rem;
+      padding: 0 1rem;
+    }
+    .v-scroll {
+      grid-row: 2;
+    }
+    .v-actions {
+      grid-row: 3;
+    }
+    .v-count {
+      grid-row: 4;
+      padding-bottom: 0.6rem;
+    }
+    .v-x {
+      background: rgba(0, 0, 0, 0.55);
+      top: calc(0.5rem + env(safe-area-inset-top));
+      right: calc(0.5rem + env(safe-area-inset-right));
+    }
+    .v-arrow {
+      display: inline-grid;
+    }
+    .v-post {
+      top: 50%;
+    }
+    .v-pl {
+      left: calc(1rem + env(safe-area-inset-left));
+    }
+    .v-pr {
+      right: calc(1rem + env(safe-area-inset-right));
+    }
+  }
+
+  /* ---------- imagem expandida (tela cheia) ---------- */
+  .zoom {
+    position: fixed;
+    inset: 0;
+    z-index: 60;
+    display: flex;
+    flex-direction: column;
+    background: #000;
+    color: #fff;
+    overflow: hidden;
+    overscroll-behavior: contain;
+    outline: none;
+  }
+  .z-bar {
+    display: flex;
+    flex-wrap: wrap;
+    justify-content: space-between;
+    align-items: center;
+    gap: 0.25rem 0.75rem;
+    padding: calc(0.25rem + env(safe-area-inset-top)) max(0.5rem, env(safe-area-inset-right)) 0.25rem
+      max(0.5rem, env(safe-area-inset-left));
+    background: rgba(12, 12, 13, 0.94);
+    position: relative;
+    z-index: 3;
+  }
+  .z-tools {
+    display: flex;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 0.35rem;
+  }
+  .z-btn {
+    min-height: 44px;
+    min-width: 44px;
+    padding: 0 0.8rem;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 0.35rem;
+    background: transparent;
+    border: 1px solid var(--line);
+    color: var(--fg);
+    border-radius: 6px;
+    font-weight: 700;
+    font-size: 0.9rem;
+    text-decoration: none;
+    transition: border-color 0.15s ease;
+  }
+  .z-btn:hover:not([disabled]) {
+    border-color: var(--accent);
+    color: var(--fg);
+  }
+  .z-btn[disabled] {
+    opacity: 0.4;
+  }
+  .z-btn svg {
+    width: 1.1rem;
+    height: 1.1rem;
+  }
+  .z-pct {
+    min-width: 3.2rem;
+    text-align: center;
+    font-size: 0.9rem;
+    font-variant-numeric: tabular-nums;
+  }
+  .z-stage {
+    position: relative;
+    flex: 1;
+    min-height: 0;
+    background: #000;
+    cursor: grab;
+    touch-action: none;
+  }
+  .z-stage:active {
+    cursor: grabbing;
+  }
+  .z-stage img {
+    max-width: none;
+    user-select: none;
+    -webkit-user-select: none;
+    -webkit-user-drag: none;
+  }
+  .z-res {
+    position: absolute;
+    z-index: 3;
+    left: max(0.75rem, env(safe-area-inset-left));
+    bottom: calc(0.5rem + env(safe-area-inset-bottom));
+    margin: 0;
+    padding: 0.2rem 0.65rem;
+    background: rgba(0, 0, 0, 0.65);
+    border-radius: 999px;
+    font-size: 0.78rem;
+    color: var(--muted);
+    pointer-events: none;
+  }
+
+  /* ---------- documentos, 404 e offline ---------- */
+  .doc {
+    max-width: 42rem;
+    padding-top: 2rem;
+    padding-bottom: 3rem;
+  }
+  .doc h1 {
+    font-size: clamp(1.8rem, 6vw, 2.4rem);
+    font-weight: 800;
+    line-height: 1.1;
+    margin: 0 0 0.5rem;
+    letter-spacing: -0.02em;
+  }
+  .doc h2 {
+    font-size: 1.15rem;
+    font-weight: 800;
+    margin: 2rem 0 0.4rem;
+  }
+  .doc p,
+  .doc ul {
+    margin: 1rem 0;
+  }
+  .doc ul {
+    list-style: disc;
+    padding-left: 1.5rem;
+  }
+  .doc li + li {
+    margin-top: 0.3rem;
+  }
+  .doc strong {
+    font-weight: 800;
+  }
+  .doc .updated {
+    color: var(--muted);
+    font-size: 0.9rem;
+    margin-top: 0;
+  }
+  .doc .tag {
+    color: var(--accent);
+    font-size: 0.8rem;
+    font-weight: 700;
+    letter-spacing: 0.18em;
+    text-transform: uppercase;
+    margin: 0 0 0.5rem;
+  }
+  .doc .lead {
+    color: var(--muted);
+    font-size: 1.1rem;
+    margin: 0 0 1.5rem;
+  }
+  .doc .btn {
+    display: inline-flex;
+    align-items: center;
+    min-height: 44px;
+    padding: 0 1.3rem;
+    background: var(--accent);
+    color: var(--accent-fg);
+    font-weight: 700;
+    text-decoration: none;
+    border-radius: 6px;
+    border: 0;
+    transition:
+      background-color 0.15s ease,
+      color 0.15s ease;
+  }
+  .doc .btn:hover {
+    background: var(--fg);
+    color: var(--bg);
+  }
+  .offline-posts {
+    margin-top: 2rem;
+  }
+  .offline-posts h2 {
+    font-size: 1rem;
+    margin: 0 0 0.75rem;
+  }
+  .offline-posts ul {
+    list-style: none;
+    margin: 0;
+    padding: 0;
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 2px;
+  }
+  .offline-posts img {
+    width: 100%;
+    height: 100%;
+    aspect-ratio: 1;
+    object-fit: cover;
+    display: block;
+  }
+
+  .rodape {
+    border-top: 1px solid var(--line);
+    padding: 1rem;
+    text-align: center;
+    color: var(--muted);
+    font-size: 0.85rem;
+  }
+  .rodape a {
+    display: inline-block;
+    color: var(--muted);
+    padding: 0.75rem 0.6rem;
+  }
+  .rodape a:hover {
+    color: var(--fg);
+  }
+
+  /* avisos: dica de instalação no iOS */
+  .aviso {
+    position: fixed;
+    z-index: 200;
+    left: 0;
+    right: 0;
+    margin: 0 auto;
+    bottom: calc(1rem + env(safe-area-inset-bottom));
+    width: min(30rem, calc(100% - 2rem));
+    display: flex;
+    align-items: center;
+    gap: 0.75rem;
+    padding: 0.6rem 0.6rem 0.6rem 1rem;
+    background: var(--surface);
+    border: 1px solid var(--line);
+    border-radius: 10px;
+    box-shadow: 0 6px 24px rgba(0, 0, 0, 0.5);
+    font-size: 0.9rem;
+  }
+  .aviso p {
+    margin: 0;
+    flex: 1;
+  }
+  .aviso button {
+    min-height: 44px;
+    min-width: 44px;
+    padding: 0 0.9rem;
+    background: transparent;
+    border: 1px solid var(--line);
+    color: var(--muted);
+    font-weight: 700;
+    border-radius: 6px;
+  }
+  .aviso button:hover {
+    background: var(--line);
+    color: var(--fg);
+  }
+
+  @media (min-width: 640px) {
+    .wrap {
+      padding: 0 1.5rem;
+    }
+    .profile {
+      grid-template-columns: 9.5rem 1fr;
+      gap: 0.9rem 2.5rem;
+      padding: 2.5rem 0 0;
+      align-items: start;
+    }
+    .avatar {
+      width: 9.5rem;
+      height: 9.5rem;
+      grid-row: 1 / span 4;
+    }
+    .handle {
+      font-size: 1.35rem;
+    }
+    .profile-main {
+      display: block;
+      grid-column: 2;
+      grid-row: 1;
+    }
+    .profile-main .actions {
+      grid-column: auto;
+      max-width: 26rem;
+    }
+    .stats {
+      grid-column: 2;
+      grid-row: 2;
+      border: 0;
+      padding: 0;
+      justify-content: flex-start;
+      gap: 2.5rem;
+    }
+    .stats li {
+      text-align: left;
+    }
+    .bio {
+      grid-column: 2;
+      grid-row: 3;
+    }
+    .push {
+      grid-column: 2;
+      grid-row: 4;
+    }
+    .tabs {
+      margin: 2rem 0 0;
+      justify-content: center;
+    }
+    .tabs button {
+      flex: 0 0 auto;
+      padding: 0.9rem 2rem;
+    }
+    .grid-posts {
+      margin: 0;
+      gap: 4px;
+    }
+    .car {
+      padding-top: 2rem;
+    }
+    .car-hl {
+      grid-template-columns: repeat(auto-fit, minmax(9rem, 1fr));
+    }
+    .car-hl > div:last-child:nth-child(odd) {
+      grid-column: auto;
+    }
+    .car-list {
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 1.3rem 2rem;
+    }
+  }
+
+  /* app instalado: some o que só serve no navegador */
+  @media (display-mode: standalone), (display-mode: fullscreen) {
+    .so-navegador {
+      display: none !important;
+    }
+  }
+}
+
+@keyframes shimmer {
+  to {
+    background-position: -200% 0;
+  }
+}
+
+@layer components {
+  /* Troca de post: a caixa que sai e a que entra dividem a mesma célula do grid e se cruzam
+     (sem depender do <style> que o modo popLayout do motion injetaria, bloqueado pela CSP). */
+  .viewer > .v-box {
+    grid-area: 1 / 1;
+  }
+  .tabs button:focus-visible {
+    outline-offset: -2px;
+  }
+  /* Página parada atrás do visualizador e do zoom (reforço ao bloqueio de rolagem do Radix). */
+  html.travado,
+  html.travado body {
+    overflow: hidden;
   }
 }

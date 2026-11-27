@@ -1,0 +1,145 @@
+name: Checar
+
+# Confere o código a cada push e pull request. Cada parte só roda quando os arquivos dela mudaram:
+#   - funcoes: Edge Functions do Supabase (deno check em supabase/functions/*/index.ts)
+#   - site:    site atual em site/ (node --check nos JS de site/public e deno check no Worker)
+#   - web:     site novo em Astro em web/ (npm ci, lint, check e build)
+# Em push na master, se tudo passou, chama o workflow "Publicar" (publicar.yml) com o que mudou.
+# Migrações do banco NUNCA são aplicadas aqui: veja migracoes.yml (manual).
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  mudancas:
+    name: O que mudou
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: read # o paths-filter lê a lista de arquivos do PR pela API
+    outputs:
+      funcoes: ${{ steps.filtro.outputs.funcoes }}
+      site: ${{ steps.filtro.outputs.site }}
+      web: ${{ steps.filtro.outputs.web }}
+      lista_funcoes: ${{ steps.nomes.outputs.lista }}
+    steps:
+      - uses: actions/checkout@v7
+      - uses: dorny/paths-filter@v4
+        id: filtro
+        with:
+          # Em push, compara com o último commit antes do push (github.event.before).
+          list-files: json
+          filters: |
+            funcoes:
+              - 'supabase/functions/**'
+              - '.github/workflows/checar.yml'
+              - '.github/workflows/publicar.yml'
+            compartilhado:
+              - 'supabase/functions/_shared/**'
+            site:
+              - 'site/**'
+              - '.github/workflows/checar.yml'
+              - '.github/workflows/publicar.yml'
+            web:
+              - 'web/**'
+              - '.github/workflows/checar.yml'
+              - '.github/workflows/publicar.yml'
+      # Nomes das funções a publicar: todas se _shared mudou; senão só as pastas que tiveram arquivo alterado.
+      # Pastas sem index.ts (função apagada) ficam de fora.
+      - name: Funções alteradas
+        id: nomes
+        env:
+          ARQUIVOS: ${{ steps.filtro.outputs.funcoes_files }}
+          COMPARTILHADO: ${{ steps.filtro.outputs.compartilhado }}
+        run: |
+          if [ "$COMPARTILHADO" = "true" ]; then
+            nomes=$(ls -d supabase/functions/*/ | xargs -n1 basename)
+          else
+            nomes=$(echo "${ARQUIVOS:-[]}" | jq -r '.[] | select(startswith("supabase/functions/")) | split("/")[2]' | sort -u)
+          fi
+          lista=""
+          for n in $nomes; do
+            if [ "$n" != "_shared" ] && [ -f "supabase/functions/$n/index.ts" ]; then
+              lista="$lista $n"
+            fi
+          done
+          lista=$(echo "$lista" | xargs)
+          echo "Funções: ${lista:-(nenhuma)}"
+          echo "lista=$lista" >> "$GITHUB_OUTPUT"
+
+  funcoes:
+    name: Funções (deno check)
+    needs: mudancas
+    if: needs.mudancas.outputs.funcoes == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: denoland/setup-deno@v2
+        with:
+          deno-version: v2.x
+      - run: deno check supabase/functions/*/index.ts
+
+  site:
+    name: Site atual (site/)
+    needs: mudancas
+    if: needs.mudancas.outputs.site == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+          package-manager-cache: false # site/ não tem package.json
+      - uses: denoland/setup-deno@v2
+        with:
+          deno-version: v2.x
+      - name: node --check nos JS de site/public
+        run: |
+          for f in site/public/*.js; do
+            echo "node --check $f"
+            node --check "$f"
+          done
+      - run: deno check site/src/index.ts
+
+  web:
+    name: Site novo (web/)
+    needs: mudancas
+    if: needs.mudancas.outputs.web == 'true'
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: web
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+      - run: npm ci
+      - run: npm run lint
+      - run: npm run check
+      - run: npm run build
+
+  # Só em push na master, e só se nenhum job de checagem falhou (pulado por falta de mudança conta como ok).
+  publicar:
+    name: Publicar
+    needs: [mudancas, funcoes, site, web]
+    if: >-
+      always()
+      && github.event_name == 'push'
+      && github.ref == 'refs/heads/master'
+      && vars.PUBLICAR_AUTOMATICO == 'sim'
+      && needs.mudancas.result == 'success'
+      && !contains(needs.*.result, 'failure')
+      && !contains(needs.*.result, 'cancelled')
+    uses: ./.github/workflows/publicar.yml
+    with:
+      funcoes: ${{ needs.mudancas.outputs.lista_funcoes }}
+      site_mudou: ${{ needs.mudancas.outputs.site == 'true' }}
+      web_mudou: ${{ needs.mudancas.outputs.web == 'true' }}
+    secrets: inherit

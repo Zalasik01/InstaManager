@@ -1,0 +1,126 @@
+name: Publicar
+
+# Publica em produção. Roda de dois jeitos:
+#   1. Sozinho: o workflow "Checar" (checar.yml) chama este arquivo em push na master, depois que as checagens
+#      passaram, informando quais funções e qual site mudaram.
+#   2. À mão: Actions > Publicar > Run workflow (só na master), para republicar funções ou o site.
+#
+# - Funções: publica só as Edge Functions alteradas (todas, se supabase/functions/_shared mudou), com --no-verify-jwt.
+# - Site: a variável de repositório SITE_DIR ("site" hoje, "web" depois da troca) escolhe a pasta publicada no
+#   Worker polo9n. Com SITE_DIR=web, roda npm ci e npm run build antes do deploy.
+# - Migrações do banco NÃO são aplicadas aqui: use o workflow manual migracoes.yml.
+#
+# Segredos: SUPABASE_ACCESS_TOKEN, SUPABASE_PROJECT_REF, CLOUDFLARE_API_TOKEN, CLOUDFLARE_ACCOUNT_ID.
+# Passo a passo em docs/deploy-automatico.md.
+
+on:
+  workflow_call:
+    inputs:
+      funcoes:
+        description: Nomes das funções a publicar, separados por espaço (vazio = nenhuma)
+        type: string
+        default: ""
+      site_mudou:
+        description: Algo mudou em site/
+        type: boolean
+        default: false
+      web_mudou:
+        description: Algo mudou em web/
+        type: boolean
+        default: false
+  workflow_dispatch:
+    inputs:
+      funcoes:
+        description: 'Funções a publicar: "todas", nomes separados por espaço, ou vazio para nenhuma'
+        type: string
+        default: ""
+      publicar_site:
+        description: Publicar o site (a pasta de SITE_DIR)
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+jobs:
+  funcoes:
+    name: Funções do Supabase
+    if: github.ref == 'refs/heads/master' && inputs.funcoes != ''
+    runs-on: ubuntu-latest
+    # Um deploy de funções por vez; o próximo espera o atual terminar.
+    concurrency:
+      group: publicar-funcoes
+      cancel-in-progress: false
+    env:
+      SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
+      SUPABASE_PROJECT_REF: ${{ secrets.SUPABASE_PROJECT_REF }}
+      FUNCOES: ${{ inputs.funcoes }}
+    steps:
+      - uses: actions/checkout@v7
+      - uses: supabase/setup-cli@v3
+        with:
+          version: 3.4.0 # CLI v3: alvo remoto via --remote; --yes confirma sem perguntar
+      - name: Publicar funções
+        run: |
+          if [ -z "$SUPABASE_ACCESS_TOKEN" ] || [ -z "$SUPABASE_PROJECT_REF" ]; then
+            echo "::error::Faltam os segredos SUPABASE_ACCESS_TOKEN e/ou SUPABASE_PROJECT_REF (veja docs/deploy-automatico.md)."
+            exit 1
+          fi
+          if [ "$FUNCOES" = "todas" ]; then
+            FUNCOES=$(ls -d supabase/functions/*/ | xargs -n1 basename)
+          fi
+          # Só aceita nomes de pastas que existem e têm index.ts (protege a entrada manual).
+          lista=""
+          for n in $FUNCOES; do
+            if [ "$n" != "_shared" ] && [ -f "supabase/functions/$n/index.ts" ]; then
+              lista="$lista $n"
+            else
+              echo "::warning::Ignorando '$n': não existe supabase/functions/$n/index.ts"
+            fi
+          done
+          if [ -z "$lista" ]; then
+            echo "Nenhuma função para publicar."
+            exit 0
+          fi
+          echo "Publicando:$lista"
+          # shellcheck disable=SC2086 # a lista é separada por espaço de propósito
+          supabase functions deploy $lista --no-verify-jwt --use-api --remote="$SUPABASE_PROJECT_REF" --yes
+
+  site:
+    name: Site (Worker polo9n)
+    if: >-
+      github.ref == 'refs/heads/master'
+      && (inputs.publicar_site
+          || ((vars.SITE_DIR || 'site') == 'web' && inputs.web_mudou)
+          || ((vars.SITE_DIR || 'site') == 'site' && inputs.site_mudou))
+    runs-on: ubuntu-latest
+    # Um deploy do site por vez; o próximo espera o atual terminar.
+    concurrency:
+      group: publicar-site
+      cancel-in-progress: false
+    env:
+      SITE_DIR: ${{ vars.SITE_DIR || 'site' }}
+    steps:
+      - uses: actions/checkout@v7
+      - name: Conferir SITE_DIR
+        run: |
+          case "$SITE_DIR" in
+            site|web) echo "Publicando a pasta $SITE_DIR" ;;
+            *) echo "::error::SITE_DIR deve ser 'site' ou 'web' (está '$SITE_DIR')."; exit 1 ;;
+          esac
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+          package-manager-cache: false
+      - name: Build do site novo (web/)
+        if: env.SITE_DIR == 'web'
+        working-directory: web
+        run: |
+          npm ci
+          npm run build
+      - uses: cloudflare/wrangler-action@v4
+        with:
+          apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          workingDirectory: ${{ env.SITE_DIR }}
+          command: deploy

@@ -1,5 +1,5 @@
 import { useEffect } from "react";
-import { iniciarAtualizacao } from "@/lib/atualizacao";
+import { iniciarAtualizacaoAutomatica } from "@/lib/atualizacao";
 
 /**
  * Sem interface: registra o service worker e mantém o site sempre na versão publicada.
@@ -7,7 +7,7 @@ import { iniciarAtualizacao } from "@/lib/atualizacao";
  */
 export default function AutoUpdate() {
   useEffect(() => {
-    iniciarAtualizacao();
+    iniciarAtualizacaoAutomatica();
   }, []);
   return null;
 }

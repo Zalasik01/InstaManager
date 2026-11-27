@@ -50,8 +50,17 @@ function campo(chave: string, valor: string): CampoFicha {
   return { chave, rotulo: rotuloDe(chave), valor: valor.trim() };
 }
 
+/** Itens sem espaços nas pontas, sem vazios e sem repetidos (ignora maiúsculas). */
 function listaLimpa(itens: readonly string[] | undefined): string[] {
-  return (itens ?? []).map((i) => i.trim()).filter((i) => i !== "");
+  const vistos = new Set<string>();
+  return (itens ?? [])
+    .map((i) => i.trim())
+    .filter((i) => {
+      const chave = i.toLocaleLowerCase("pt-BR");
+      if (i === "" || vistos.has(chave)) return false;
+      vistos.add(chave);
+      return true;
+    });
 }
 
 export function montarFicha(carro: DadosCarro): FichaMontada {

@@ -20,25 +20,57 @@ function commit() {
     return "dev";
   }
 }
+/**
+ * O @vite-pwa/astro 2.0.4 só procura os arquivos em build.client (dist/client) quando output === "server";
+ * com output "static" ele usa dist/, mas o @astrojs/cloudflare grava o site em dist/client mesmo assim.
+ * Este embrulho mostra output "server" só para a integração do PWA (o Astro continua "static"), e o
+ * sw.js e o pré-cache passam a sair de dist/client, junto com o resto do site.
+ */
+/**
+ * @param {import("astro").AstroIntegration} integracao
+ * @returns {import("astro").AstroIntegration}
+ */
+function pwaNoClient(integracao) {
+  const original = integracao.hooks["astro:config:setup"];
+  if (!original) return integracao;
+  integracao.hooks["astro:config:setup"] = (params) =>
+    original({
+      ...params,
+      config: new Proxy(params.config, {
+        get: (alvo, chave) => (chave === "output" ? "server" : Reflect.get(alvo, chave)),
+      }),
+    });
+  return integracao;
+}
+
 const BUILD_ID = `${commit()}-${Date.now().toString(36)}`;
 
 // https://astro.build/config
 export default defineConfig({
   site: "https://polo9n.com.br",
   trailingSlash: "never",
-  adapter: cloudflare(),
-  // Páginas são estáticas (prerender); só /api/posts e o middleware rodam no Worker.
+  // imageService "passthrough": não usamos astro:assets, então o deploy não exige o binding IMAGES.
+  adapter: cloudflare({ imageService: "passthrough" }),
+  // Sessions do Astro não são usadas: sem isso o adapter pediria um KV "SESSION" no deploy.
+  session: false,
+  // Páginas são estáticas (prerender). O Worker (src/worker.ts) atende tudo primeiro: rotas /api/*, /m/*,
+  // /version.json, redirecionamento do www, noindex no workers.dev e o id da versão no HTML.
   integrations: [
     react(),
     sitemap({ filter: (page) => !/\/(404|offline)\/?$/.test(page) }),
-    AstroPWAIntegration({
+    pwaNoClient(AstroPWAIntegration({
       registerType: "autoUpdate",
-      strategies: "injectManifest",
-      srcDir: "src",
-      filename: "sw.ts",
+      // "buildSW" (v2 do @vite-pwa/astro): compila o src/sw.ts (TypeScript, Rolldown) e injeta o manifesto
+      // de pré-cache. Na v2 o "injectManifest" só injeta num SW já pronto (não compila TS), e o
+      // "generateSW" não deixa escrever os handlers de push/notificationclick nem as regras de Range/.mp4.
+      strategies: "buildSW",
       manifestFilename: "manifest.webmanifest",
       injectRegister: false,
-      includeAssets: ["favicon.svg", "img/*.png"],
+      // Arquivos de public/ que entram no pré-cache (sem curinga: a v2 lê cada caminho literalmente).
+      // Os ícones do manifesto e o próprio manifesto já entram sozinhos.
+      // Os atalhos usam o mesmo icon-192 do manifesto: não repetir no pré-cache.
+      includeManifestShortcutIcons: false,
+      includeAssets: ["favicon.svg", "img/favicon-32.png", "img/apple-touch-icon.png"],
       manifest: {
         id: "/",
         name: "Polo 9n4",
@@ -80,12 +112,17 @@ export default defineConfig({
           },
         ],
       },
-      injectManifest: {
-        globPatterns: ["**/*.{js,css,html,woff2,svg,png,webmanifest}"],
-        globIgnores: ["**/_worker.js/**", "**/404.html", "**/404/**"],
+      buildSW: {
+        swSrc: "src/sw.ts",
+        // HTML fora do pré-cache (navegação é rede primeiro); só a página /offline entra, para o fallback.
+        globPatterns: [
+          "**/*.{js,css,woff2}",
+          "offline/index.html",
+        ],
+        globIgnores: ["**/_worker.js/**", "**/sw.js", "**/.vite-pwa/**"],
       },
       devOptions: { enabled: false },
-    }),
+    })),
   ],
   vite: { plugins: [tailwindcss()], define: { __BUILD_ID__: JSON.stringify(BUILD_ID) } },
   security: {
@@ -95,7 +132,9 @@ export default defineConfig({
       algorithm: "SHA-256",
       directives: [
         "default-src 'self'",
-        `img-src 'self' data: ${SUPABASE}`,
+        // Imagens saem do próprio domínio (/m/*); o vídeo vem direto do Supabase (Range/206).
+        "img-src 'self' data:",
+        `media-src 'self' ${SUPABASE}`,
         `connect-src 'self' ${SUPABASE}`,
         "manifest-src 'self'",
         "worker-src 'self'",

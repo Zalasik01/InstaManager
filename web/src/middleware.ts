@@ -1,5 +1,11 @@
 import { defineMiddleware } from "astro:middleware";
 
+/**
+ * Middleware do Astro: só roda nas rotas dinâmicas (/api/*, /m/*, /version.json).
+ * As páginas estáticas saem do ASSETS antes dele, por isso a regra completa (www -> domínio, noindex no
+ * workers.dev, versão no HTML, cabeçalhos de segurança) está em src/worker.ts. Isto aqui é só reforço,
+ * para valer também se a rota for chamada sem passar pelo worker.ts (ex.: astro dev).
+ */
 const DOMINIO = "polo9n.com.br";
 
 export const onRequest = defineMiddleware(async ({ url }, next) => {

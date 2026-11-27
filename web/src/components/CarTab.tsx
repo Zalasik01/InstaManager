@@ -1,3 +1,4 @@
+import { motion, useReducedMotion, type Variants } from "motion/react";
 import { dataIso, formatarData } from "@/lib/format";
 import type { FichaMontada } from "@/types";
 
@@ -6,61 +7,72 @@ interface CarTabProps {
   ficha: FichaMontada;
 }
 
-/** Aba "O carro": cabeçalho, destaques e seções da ficha. (Visual final: fase 2.) */
+/** Aba "O carro": cabeçalho (sem foto), destaques, seções agrupadas e data de atualização. */
 export default function CarTab({ ficha }: CarTabProps) {
-  const vazia = !ficha.nome && !ficha.destaques.length && !ficha.secoes.length;
-  if (vazia) return <p className="text-muted py-10 text-center">A ficha do carro ainda está vazia.</p>;
+  const reduz = useReducedMotion();
+  const vazia = !ficha.nome && !ficha.sobretitulo && !ficha.destaques.length && !ficha.secoes.length;
+  if (vazia) return <p className="car-erro">A ficha do carro ainda está vazia.</p>;
+
+  // Cada bloco entra em sequência, com um deslocamento curto.
+  const lista: Variants = { mostra: { transition: { staggerChildren: reduz ? 0 : 0.05 } } };
+  const item: Variants = {
+    some: reduz ? { opacity: 1 } : { opacity: 0, y: 8 },
+    mostra: { opacity: 1, y: 0, transition: { duration: 0.35, ease: [0.2, 0.7, 0.2, 1] } },
+  };
 
   const iso = ficha.atualizadoEm;
   return (
-    <div className="flex flex-col gap-6">
+    <motion.div className="car" variants={lista} initial="some" animate="mostra">
       {ficha.nome || ficha.sobretitulo ? (
-        <header>
-          {ficha.sobretitulo ? <p className="text-accent text-sm font-bold">{ficha.sobretitulo}</p> : null}
-          <h2 className="text-2xl font-extrabold">{ficha.nome || "O carro"}</h2>
-        </header>
+        <motion.header className="car-head" variants={item}>
+          {ficha.sobretitulo ? <p className="car-eyebrow">{ficha.sobretitulo}</p> : null}
+          <h2 className="car-name">{ficha.nome || "O carro"}</h2>
+        </motion.header>
       ) : null}
 
       {ficha.destaques.length ? (
-        <dl className="grid grid-cols-2 gap-3">
+        <motion.dl className="car-hl" variants={item}>
           {ficha.destaques.map((c) => (
-            <div key={c.chave} className="bg-surface border-line rounded-lg border p-3">
-              <dt className="text-muted text-xs">{c.rotulo}</dt>
-              <dd className="font-bold">{c.valor}</dd>
+            <div key={c.chave}>
+              <dt>{c.rotulo}</dt>
+              <dd>{c.valor}</dd>
             </div>
           ))}
-        </dl>
+        </motion.dl>
       ) : null}
 
-      {ficha.secoes.map((s) => (
-        <section key={s.titulo} aria-label={s.titulo}>
-          <h3 className="mb-2 font-extrabold">{s.titulo}</h3>
+      {ficha.secoes.map((s, i) => (
+        <motion.section
+          key={s.titulo}
+          className="car-sec"
+          aria-labelledby={`carro-s-${i}`}
+          variants={item}
+        >
+          <h2 id={`carro-s-${i}`}>{s.titulo}</h2>
           {s.tipo === "campos" ? (
-            <dl className="divide-line divide-y">
+            <dl className="car-list">
               {s.campos.map((c) => (
-                <div key={c.chave} className="flex justify-between gap-4 py-2">
-                  <dt className="text-muted">{c.rotulo}</dt>
-                  <dd className="text-right">{c.valor}</dd>
+                <div key={c.chave}>
+                  <dt>{c.rotulo}</dt>
+                  <dd>{c.valor}</dd>
                 </div>
               ))}
             </dl>
           ) : (
-            <ul className="flex flex-wrap gap-2">
-              {s.chips.map((m) => (
-                <li key={m} className="bg-surface border-line rounded-full border px-3 py-1 text-sm">
-                  {m}
-                </li>
+            <ul className="car-chips">
+              {s.chips.map((m, k) => (
+                <li key={`${m}-${k}`}>{m}</li>
               ))}
             </ul>
           )}
-        </section>
+        </motion.section>
       ))}
 
       {iso ? (
-        <p className="text-muted text-xs">
+        <motion.p className="car-upd" variants={item}>
           Atualizado em <time dateTime={dataIso(iso) ?? iso}>{formatarData(iso)}</time>
-        </p>
+        </motion.p>
       ) : null}
-    </div>
+    </motion.div>
   );
 }

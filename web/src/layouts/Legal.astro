@@ -1,5 +1,5 @@
 ---
-/** Layout das páginas jurídicas (conteúdo vem de src/content/legal/*.md). */
+/** Layout das páginas jurídicas (conteúdo vem de src/content/legal/*.md, texto intacto). */
 import Base from "@/layouts/Base.astro";
 import { formatarDataCurta } from "@/lib/format";
 
@@ -20,10 +20,9 @@ const { titulo, descricao, ogDescricao, caminho, atualizado } = Astro.props;
   caminho={caminho}
   ogTitulo={`${titulo} | Polo 9n4`}
   ogDescricao={ogDescricao}
+  classeMain="doc"
 >
-  <article class="prose-doc">
-    <h1>{titulo}</h1>
-    <p class="atualizado">Última atualização: {formatarDataCurta(atualizado)}</p>
-    <slot />
-  </article>
+  <h1>{titulo}</h1>
+  <p class="updated">Última atualização: {formatarDataCurta(atualizado)}</p>
+  <slot />
 </Base>

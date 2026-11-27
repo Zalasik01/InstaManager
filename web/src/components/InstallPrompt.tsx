@@ -1,4 +1,6 @@
+import { AnimatePresence, motion, useReducedMotion } from "motion/react";
 import { useEffect, useState } from "react";
+import { ehIos, instalado } from "@/components/avisos";
 
 /** Evento não padrão do Chrome/Edge/Android que permite instalar o PWA. */
 interface BeforeInstallPromptEvent extends Event {
@@ -6,16 +8,7 @@ interface BeforeInstallPromptEvent extends Event {
   userChoice: Promise<{ outcome: "accepted" | "dismissed" }>;
 }
 
-const CHAVE_DICA_IOS = "polo9n:dica-ios-dispensada";
-
-function emModoApp(): boolean {
-  const navegadorIos = (navigator as Navigator & { standalone?: boolean }).standalone === true;
-  return window.matchMedia("(display-mode: standalone), (display-mode: fullscreen)").matches || navegadorIos;
-}
-
-function ehIos(): boolean {
-  return /iphone|ipad|ipod/i.test(navigator.userAgent);
-}
+const CHAVE_DICA_IOS = "polo9n-dica-ios";
 
 function lerDispensada(): boolean {
   try {
@@ -25,17 +18,17 @@ function lerDispensada(): boolean {
   }
 }
 
-/** Botão "Instalar app" (beforeinstallprompt) e dica para iOS. Some quando já está instalado. */
+/**
+ * Botão "Instalar app" na barra do topo (beforeinstallprompt) e dica de instalação no iOS.
+ * Nada aparece com o app já instalado (standalone/fullscreen).
+ */
 export default function InstallPrompt() {
+  const reduz = useReducedMotion();
   const [evento, setEvento] = useState<BeforeInstallPromptEvent | null>(null);
-  const [instalado, setInstalado] = useState(false);
   const [dicaIos, setDicaIos] = useState(false);
 
   useEffect(() => {
-    if (emModoApp()) {
-      setInstalado(true);
-      return;
-    }
+    if (instalado()) return;
     if (ehIos() && !lerDispensada()) setDicaIos(true);
 
     const aoOferecer = (e: Event) => {
@@ -43,8 +36,8 @@ export default function InstallPrompt() {
       setEvento(e as BeforeInstallPromptEvent);
     };
     const aoInstalar = () => {
-      setInstalado(true);
       setEvento(null);
+      setDicaIos(false);
     };
     window.addEventListener("beforeinstallprompt", aoOferecer);
     window.addEventListener("appinstalled", aoInstalar);
@@ -54,13 +47,12 @@ export default function InstallPrompt() {
     };
   }, []);
 
-  if (instalado) return null;
-
-  async function instalar() {
+  function instalar() {
     if (!evento) return;
-    await evento.prompt();
-    await evento.userChoice;
+    const ev = evento;
     setEvento(null);
+    void ev.prompt().catch(() => {});
+    ev.userChoice?.catch(() => {});
   }
 
   function dispensar() {
@@ -75,28 +67,34 @@ export default function InstallPrompt() {
   return (
     <>
       {evento ? (
-        <button
+        <motion.button
           type="button"
-          onClick={() => void instalar()}
-          className="border-accent text-accent rounded-lg border px-3 py-1 text-sm font-bold"
+          className="so-navegador"
+          initial={{ opacity: 0 }}
+          animate={{ opacity: 1 }}
+          whileTap={{ scale: 0.95 }}
+          onClick={instalar}
         >
           Instalar app
-        </button>
+        </motion.button>
       ) : null}
-      {dicaIos ? (
-        <div
-          role="note"
-          className="bg-surface border-line fixed inset-x-4 bottom-4 z-40 mx-auto flex max-w-md items-start justify-between gap-3 rounded-xl border p-4 text-sm"
-        >
-          <p>
-            Para instalar no iPhone: toque em Compartilhar e depois em &quot;Adicionar à Tela de
-            Início&quot;.
-          </p>
-          <button type="button" onClick={dispensar} className="text-muted font-bold">
-            Dispensar
-          </button>
-        </div>
-      ) : null}
+      <AnimatePresence>
+        {dicaIos ? (
+          <motion.div
+            className="aviso so-navegador"
+            role="note"
+            initial={reduz ? { opacity: 0 } : { opacity: 0, y: 16 }}
+            animate={{ opacity: 1, y: 0 }}
+            exit={reduz ? { opacity: 0 } : { opacity: 0, y: 16 }}
+            transition={{ type: "spring", stiffness: 400, damping: 34 }}
+          >
+            <p>Para instalar: toque em Compartilhar e depois em Adicionar à Tela de Início.</p>
+            <motion.button whileTap={{ scale: 0.95 }} type="button" aria-label="Dispensar dica" onClick={dispensar}>
+              OK
+            </motion.button>
+          </motion.div>
+        ) : null}
+      </AnimatePresence>
     </>
   );
 }

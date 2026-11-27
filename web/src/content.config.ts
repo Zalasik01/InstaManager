@@ -27,7 +27,7 @@ const links = defineCollection({
       .array(
         z.object({
           titulo: z.string().min(1),
-          url: z.string().url(),
+          url: z.url(),
           categoria: texto,
           loja: texto,
           descricao: texto,

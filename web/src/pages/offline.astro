@@ -9,10 +9,11 @@ import Base from "@/layouts/Base.astro";
   caminho="/offline"
   robots="noindex,follow"
   ogDescricao="Página de aviso sem conexão do Polo 9n4."
+  classeMain="doc"
 >
-  <p class="text-accent text-sm font-bold tracking-wide uppercase">Sem conexão</p>
-  <h1 class="mt-2 text-3xl font-extrabold">Você está offline</h1>
-  <p class="text-muted mt-3">
+  <p class="tag">Sem conexão</p>
+  <h1>Você está offline</h1>
+  <p class="lead">
     Não deu para carregar esta página agora. Confira o Wi-Fi ou os dados móveis e tente de novo.
   </p>
   <OfflineActions client:load />

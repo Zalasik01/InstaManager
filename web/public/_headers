@@ -1,7 +1,13 @@
-# Cabeçalhos de segurança em todas as respostas dos arquivos estáticos.
-# A CSP de scripts e estilos NAO fica aqui: o Astro a gera por página (meta http-equiv, com hashes,
-# sem unsafe-inline). Esta é a parte que só vale como cabeçalho (frame-ancestors) mais um reforço
-# dos demais destinos. As duas políticas valem juntas (vence a mais restritiva).
+# Cabeçalhos dos arquivos estáticos (dist/client), porte de site/public/_headers.
+# O que o Worker gera (API, /m/*, /version.json, HTML com a versão injetada) recebe os mesmos cabeçalhos
+# de segurança em src/lib/borda.ts, só quando faltarem.
+#
+# CSP: a parte de scripts e estilos NAO fica aqui. O Astro (security.csp em astro.config.mjs) gera em cada
+# página um <meta http-equiv="content-security-policy"> com os hashes dos scripts/estilos inline (inclusive
+# o script que hidrata as ilhas), sem 'unsafe-inline'. Este cabeçalho não tem default-src/script-src/style-src
+# de propósito: se tivesse, valeria junto com a meta (as duas políticas somam, vence a mais restritiva) e
+# bloquearia os scripts com hash. Aqui fica o que só funciona como cabeçalho (frame-ancestors) e o reforço
+# dos demais destinos. Imagens saem do próprio domínio (/m/*); o vídeo vem direto do Supabase (media-src).
 /*
   X-Content-Type-Options: nosniff
   Referrer-Policy: strict-origin-when-cross-origin
@@ -9,9 +15,10 @@
   X-Frame-Options: DENY
   Strict-Transport-Security: max-age=31536000; includeSubDomains; preload
   Cross-Origin-Opener-Policy: same-origin
-  Content-Security-Policy: img-src 'self' data: https://crzmyemggpgjcrwwuwka.supabase.co; connect-src 'self' https://crzmyemggpgjcrwwuwka.supabase.co; manifest-src 'self'; worker-src 'self'; object-src 'none'; frame-ancestors 'none'; base-uri 'self'; form-action 'none'
+  Content-Security-Policy: img-src 'self' data:; media-src 'self' https://crzmyemggpgjcrwwuwka.supabase.co; connect-src 'self' https://crzmyemggpgjcrwwuwka.supabase.co; manifest-src 'self'; worker-src 'self'; object-src 'none'; frame-ancestors 'none'; base-uri 'self'; form-action 'none'
 
 # Cache: regras por caminho (o Cloudflare junta valores repetidos do mesmo cabeçalho, então nada de curinga).
+# As páginas HTML saem do Worker com "no-cache" (o corpo é reescrito com o id da versão).
 /
   Cache-Control: public, max-age=0, must-revalidate
 /privacidade
@@ -30,8 +37,6 @@
   Cache-Control: public, max-age=3600
 /sw.js
   Cache-Control: no-cache
-/version.json
-  Cache-Control: no-store
 /manifest.webmanifest
   Content-Type: application/manifest+json
   Cache-Control: public, max-age=0, must-revalidate

@@ -22,7 +22,7 @@ export function deveAtualizar(
   return jaTentada !== remota;
 }
 
-/** Nomes de cache que o app criou (o Workbox do pré-cache usa "workbox-precache-*"). */
+/** Nomes de cache que o app criou (src/sw.ts usa o prefixo "polo9n-"; "workbox-" é de versões antigas). */
 export function cacheDoApp(nome: string): boolean {
   return nome.startsWith("polo9n-") || nome.startsWith("workbox-");
 }
@@ -91,8 +91,15 @@ async function checarVersao(carregada: string): Promise<void> {
   }
 }
 
-/** Registra o service worker e liga todas as checagens de versão. Chamar uma vez por página. */
-export function iniciarAtualizacao(): void {
+let iniciado = false;
+
+/**
+ * Registra o service worker (/sw.js) e liga todas as checagens de versão. Chamar uma vez por página
+ * (chamadas repetidas são ignoradas). Porte de registrarSW/checarVersao/recarregarLimpo do site antigo.
+ */
+export function iniciarAtualizacaoAutomatica(): void {
+  if (iniciado || typeof window === "undefined") return;
+  iniciado = true;
   if (!("serviceWorker" in navigator)) return;
   const seguro =
     window.location.protocol === "https:" ||
@@ -108,19 +115,27 @@ export function iniciarAtualizacao(): void {
     if (tinhaControlador) void recarregarLimpo();
   });
 
-  navigator.serviceWorker
-    .register("/sw.js", { scope: "/" })
-    .then((reg) => reg.update())
-    .catch(() => {
-      /* o site funciona sem service worker */
-    });
+  const ligar = () => {
+    navigator.serviceWorker
+      .register("/sw.js", { scope: "/" })
+      .then((reg) => reg.update())
+      .catch(() => {
+        /* o site funciona sem service worker */
+      });
 
-  window.setTimeout(() => void checarVersao(carregada), 4000);
-  window.setInterval(() => void checarVersao(carregada), INTERVALO_MS);
-  window.addEventListener("online", () => void checarVersao(carregada));
-  document.addEventListener("visibilitychange", () => {
-    if (document.visibilityState !== "visible") return;
-    void checarVersao(carregada);
-    void atualizarRegistro();
-  });
+    window.setTimeout(() => void checarVersao(carregada), 4000);
+    window.setInterval(() => void checarVersao(carregada), INTERVALO_MS);
+    window.addEventListener("online", () => void checarVersao(carregada));
+    document.addEventListener("visibilitychange", () => {
+      if (document.visibilityState !== "visible") return;
+      void checarVersao(carregada);
+      void atualizarRegistro();
+    });
+  };
+  // Como no site antigo: registra depois do "load", para não disputar banda com a primeira pintura.
+  if (document.readyState === "complete") ligar();
+  else window.addEventListener("load", ligar, { once: true });
 }
+
+/** Nome antigo, mantido para quem já importa (components/AutoUpdate.tsx). */
+export const iniciarAtualizacao = iniciarAtualizacaoAutomatica;

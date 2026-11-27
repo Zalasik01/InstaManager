@@ -42,3 +42,26 @@ export function dataIso(entrada: string | Date): string | null {
   const dd = String(d.getDate()).padStart(2, "0");
   return `${d.getFullYear()}-${mm}-${dd}`;
 }
+
+/** "1 curtida", "1,2 mil curtidas". */
+export function plural(n: number, um: string, varios: string): string {
+  return `${formatarNumero(n)} ${n === 1 ? um : varios}`;
+}
+
+/** Número válido para exibir (inteiro, finito e não negativo) ou null. */
+export function numeroValido(n: number | null | undefined): number | null {
+  return typeof n === "number" && Number.isFinite(n) && n >= 0 ? n : null;
+}
+
+/** "agora", "5 min", "3 h", "2 d", "4 sem" ou a data curta para mais de um ano. */
+export function dataRelativa(iso: string, agora = Date.now()): string {
+  const t = new Date(iso).getTime();
+  if (Number.isNaN(t)) return "";
+  const s = Math.max(0, (agora - t) / 1000);
+  if (s < 60) return "agora";
+  if (s < 3600) return `${Math.floor(s / 60)} min`;
+  if (s < 86400) return `${Math.floor(s / 3600)} h`;
+  if (s < 7 * 86400) return `${Math.floor(s / 86400)} d`;
+  if (s < 365 * 86400) return `${Math.floor(s / (7 * 86400))} sem`;
+  return new Date(t).toLocaleDateString("pt-BR", { day: "numeric", month: "short", year: "numeric" });
+}

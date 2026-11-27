@@ -1,9 +1,9 @@
-import type { PerfilPublico, Post, PostsResposta } from "@/types";
+import type { Comentario, Perfil, Post, PostsResposta } from "@/types";
 
 /**
- * Acesso de servidor ao Supabase (só usado por /api/posts).
+ * Acesso de servidor ao Supabase (usado só pelas rotas /api/* e /m/* do Worker).
  * Usa apenas a chave PUBLISHABLE, pública por desenho: as tabelas têm RLS sem política e o site
- * só alcança o que as funções listar_posts_publicos/contar_posts_publicos devolvem.
+ * só alcança o que as funções (RPC) públicas devolvem.
  */
 
 export interface ConfigSupabase {
@@ -11,22 +11,41 @@ export interface ConfigSupabase {
   chave: string;
 }
 
-/** Linha devolvida pela RPC listar_posts_publicos. */
+/** Linha devolvida pela RPC listar_posts_publicos. `fixado` pode faltar enquanto a RPC nova não sobe. */
 export interface PostRpc {
   id: string;
   legenda: string | null;
   publicado_em: string;
   permalink: string | null;
-  galeria_paths: string[];
+  galeria_paths: string[] | null;
   visualizacoes: number | null;
   curtidas: number | null;
   comentarios: number | null;
+  video_path?: string | null;
+  fixado?: boolean | null;
 }
 
-/** URL pública de um arquivo do bucket "galeria", com cada segmento do caminho codificado. */
+/** Caminho válido de imagem da galeria: AAAA/MM/arquivo.jpg (sem "..", sem barra extra). */
+export const CAMINHO_IMAGEM = /^[0-9]{4}\/[0-9]{2}\/[A-Za-z0-9_.-]+\.jpg$/;
+
+export function caminhoImagemValido(caminho: string): boolean {
+  return CAMINHO_IMAGEM.test(caminho) && !caminho.includes("..");
+}
+
+/** Caminho com cada segmento codificado (para montar URLs). */
+const codificar = (caminho: string) => caminho.split("/").map(encodeURIComponent).join("/");
+
+/** URL pública de um arquivo do bucket "galeria" no Supabase. */
+export function urlGaleria(supabaseUrl: string, caminho: string): string {
+  return `${supabaseUrl}/storage/v1/object/public/galeria/${codificar(caminho)}`;
+}
+
+/**
+ * URL de uma imagem para o navegador: pelo próprio domínio (/m/...), com cache de borda.
+ * Caminho fora do padrão (não deveria acontecer) cai na URL direta do Supabase.
+ */
 export function urlImagem(supabaseUrl: string, caminho: string): string {
-  const segmentos = caminho.split("/").map(encodeURIComponent).join("/");
-  return `${supabaseUrl}/storage/v1/object/public/galeria/${segmentos}`;
+  return caminhoImagemValido(caminho) ? `/m/${caminho}` : urlGaleria(supabaseUrl, caminho);
 }
 
 export function montarResposta(
@@ -42,7 +61,10 @@ export function montarResposta(
     visualizacoes: p.visualizacoes,
     curtidas: p.curtidas,
     comentarios: p.comentarios,
+    // Vídeo/Reel: URL do MP4 direto no Supabase (o navegador pede por partes, Range/206).
+    video: p.video_path ? urlGaleria(supabaseUrl, p.video_path) : null,
     imagens: (p.galeria_paths ?? []).map((c) => urlImagem(supabaseUrl, c)),
+    fixado: p.fixado === true,
   }));
   return { total, posts };
 }
@@ -64,6 +86,8 @@ export async function rpc<T>(
     signal: AbortSignal.timeout(8000),
   });
   if (!r.ok) throw new Error(`Supabase ${r.status}`);
+  // RPC "returns void" responde 204 sem corpo.
+  if (r.status === 204) return undefined as T;
   return (await r.json()) as T;
 }
 
@@ -88,7 +112,7 @@ export interface PerfilRpc {
   atualizado_em: string;
 }
 
-export function montarPerfil(linhas: readonly PerfilRpc[]): PerfilPublico {
+export function montarPerfil(linhas: readonly PerfilRpc[]): Perfil {
   const p = linhas[0];
   return p
     ? {
@@ -103,6 +127,34 @@ export function montarPerfil(linhas: readonly PerfilRpc[]): PerfilPublico {
 export async function obterPerfil(
   cfg: ConfigSupabase,
   buscar: typeof fetch = fetch,
-): Promise<PerfilPublico> {
+): Promise<Perfil> {
   return montarPerfil(await rpc<PerfilRpc[]>(cfg, "obter_perfil_publico", {}, buscar));
+}
+
+/** Linha devolvida pela RPC listar_comentarios_publicos. */
+interface ComentarioRpc {
+  usuario: string | null;
+  texto: string | null;
+  curtidas: number | null;
+  criado_em: string | null;
+}
+
+/** Comentários do Instagram de um post (copiados para o banco a cada 3 horas). Máximo 20. */
+export async function listarComentarios(
+  cfg: ConfigSupabase,
+  postId: string,
+  buscar: typeof fetch = fetch,
+): Promise<Comentario[]> {
+  const lista = await rpc<ComentarioRpc[]>(
+    cfg,
+    "listar_comentarios_publicos",
+    { p_post_id: postId, p_limite: 20 },
+    buscar,
+  );
+  return lista.map((c) => ({
+    usuario: c.usuario ?? "",
+    texto: c.texto ?? "",
+    curtidas: c.curtidas,
+    criado_em: c.criado_em ?? "",
+  }));
 }

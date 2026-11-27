@@ -1,8 +1,7 @@
 ---
 import { getEntry } from "astro:content";
-import ProfileStats from "@/components/ProfileStats";
+import ProfileHeader from "@/components/ProfileHeader";
 import ProfileTabs from "@/components/ProfileTabs";
-import ShareButton from "@/components/ShareButton";
 import Base from "@/layouts/Base.astro";
 import { montarFicha } from "@/lib/ficha";
 import { SITE } from "@/site";
@@ -72,64 +71,12 @@ const jsonLd = {
 >
   <script type="application/ld+json" slot="head" set:html={JSON.stringify(jsonLd)} />
 
-  <section aria-label="Perfil" class="flex flex-col gap-5">
-    <div class="flex items-center gap-5">
-      <img
-        src="/img/icon-192.png"
-        width="192"
-        height="192"
-        alt="Foto de perfil de @polo_9n4_12: VW Polo branco visto de trás"
-        fetchpriority="high"
-        decoding="async"
-        class="border-line size-24 shrink-0 rounded-full border object-cover sm:size-32"
-      />
-      <div class="flex min-w-0 flex-col gap-3">
-        <h1 class="truncate text-xl font-extrabold sm:text-2xl">@{SITE.perfil}</h1>
-        <div class="flex flex-wrap gap-2">
-          <a
-            href={SITE.instagram}
-            rel="noopener noreferrer"
-            class="bg-accent text-accent-fg rounded-lg px-4 py-2 text-sm font-bold"
-            >Seguir no Instagram</a
-          >
-          <ShareButton
-            client:idle
-            titulo={ogTitulo}
-            texto={ogDescricao}
-            url={`${SITE.url}/`}
-            rotulo="Compartilhar"
-          />
-        </div>
-      </div>
-    </div>
-
-    <ul class="flex gap-8 text-sm">
-      <ProfileStats client:load />
-      {
-        carro.data.fotos && (
-          <li class="flex flex-col">
-            <b class="text-base">{carro.data.fotos}</b>
-            <span class="text-muted">fotos do carro</span>
-          </li>
-        )
-      }
-      {
-        carro.data.desde && (
-          <li class="flex flex-col">
-            <b class="text-base">{carro.data.desde}</b>
-            <span class="text-muted">desde</span>
-          </li>
-        )
-      }
-    </ul>
-
-    <p class="flex flex-col text-sm leading-relaxed">
-      <strong>{SITE.bio.titulo}</strong>
-      <span>{SITE.bio.texto}</span>
+  <ProfileHeader client:load fotos={carro.data.fotos} desde={carro.data.desde} />
+  <ProfileTabs client:load ficha={ficha} links={itens} />
+  <noscript>
+    <p class="status">
+      Ative o JavaScript para ver os posts, ou veja tudo em
+      <a href={SITE.instagram} rel="noopener noreferrer">@{SITE.perfil}</a>.
     </p>
-  </section>
-
-  <div class="mt-6">
-    <ProfileTabs client:load ficha={ficha} links={itens} linksAtualizadoEm={links.data.atualizado_em} />
-  </div>
+  </noscript>
 </Base>

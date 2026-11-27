@@ -8,11 +8,10 @@ import Base from "@/layouts/Base.astro";
   caminho="/404"
   robots="noindex,follow"
   ogDescricao="A página não existe ou mudou de lugar."
+  classeMain="doc"
 >
-  <p class="text-accent text-sm font-bold tracking-wide uppercase">Erro 404</p>
-  <h1 class="mt-2 text-3xl font-extrabold">Página não encontrada</h1>
-  <p class="text-muted mt-3">O endereço não existe ou mudou de lugar.</p>
-  <a href="/" class="bg-accent text-accent-fg mt-6 inline-block rounded-lg px-4 py-2 font-bold"
-    >Voltar ao início</a
-  >
+  <p class="tag">Erro 404</p>
+  <h1>Página não encontrada</h1>
+  <p class="lead">O endereço não existe ou mudou de lugar.</p>
+  <a class="btn" href="/">Voltar ao início</a>
 </Base>

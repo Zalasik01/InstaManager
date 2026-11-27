@@ -9,8 +9,12 @@ export interface Post {
   visualizacoes: number | null;
   curtidas: number | null;
   comentarios: number | null;
-  /** URLs absolutas das imagens (Supabase Storage, bucket "galeria"). */
+  /** Vídeo/Reel: URL do MP4 direto no Supabase Storage (Range/206); null para foto. */
+  video: string | null;
+  /** Imagens pelo próprio domínio, no formato "/m/AAAA/MM/arquivo.jpg" (rota com cache de borda). */
   imagens: string[];
+  /** Post fixado no topo do perfil (os fixados vêm primeiro na lista). */
+  fixado: boolean;
 }
 
 export interface PostsResposta {
@@ -69,9 +73,31 @@ export interface FichaMontada {
 }
 
 /** Resposta de /api/perfil (números públicos do Instagram; null quando ainda não coletados). */
-export interface PerfilPublico {
+export interface Perfil {
   seguidores: number | null;
   seguindo: number | null;
   posts: number | null;
   atualizado_em: string | null;
+}
+
+/** Nome antigo de Perfil, mantido para o código que já o usa. */
+export type PerfilPublico = Perfil;
+
+/** Comentário do Instagram de um post (resposta de /api/comentarios). */
+export interface Comentario {
+  usuario: string;
+  texto: string;
+  curtidas: number | null;
+  criado_em: string;
+}
+
+export interface ComentariosResposta {
+  comentarios: Comentario[];
+}
+
+/** Clique num link da aba "Links" (POST /api/clique). */
+export interface Clique {
+  linkId: string;
+  url: string;
+  titulo: string;
 }

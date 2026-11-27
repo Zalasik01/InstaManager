@@ -1,0 +1,43 @@
+{
+  // Site polo9n.com.br em Astro (@astrojs/cloudflare). É o MESMO Worker de produção do site antigo (site/).
+  // O build (astro build) gera dist/server/wrangler.json a partir deste arquivo; o "wrangler deploy" usa esse.
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "polo9n",
+  // Entrada própria: envolve o handler do Astro para valer também nas páginas estáticas
+  // (www -> domínio, noindex no workers.dev, id da versão no HTML). Veja src/worker.ts.
+  "main": "./src/worker.ts",
+  "compatibility_date": "2026-11-25",
+  "workers_dev": true,
+  // Id da versão de cada deploy: vai para <meta name="app-versao"> e /version.json (atualização automática).
+  "version_metadata": { "binding": "CF_VERSION_METADATA" },
+  "assets": {
+    "binding": "ASSETS",
+    "not_found_handling": "404-page",
+    // Toda requisição passa pelo Worker; os arquivos estáticos continuam saindo de ASSETS.
+    "run_worker_first": true
+  },
+  "observability": { "enabled": true },
+  "vars": {
+    "SUPABASE_URL": "https://crzmyemggpgjcrwwuwka.supabase.co",
+    // Chave publishable do Supabase: pública por desenho (as tabelas têm RLS sem política).
+    "SUPABASE_PUBLISHABLE_KEY": "sb_publishable_ymEIzdY3XwK_QJ85yAx2gQ_w33cCiRA"
+  },
+  "routes": [
+    { "pattern": "polo9n.com.br", "custom_domain": true },
+    { "pattern": "www.polo9n.com.br", "custom_domain": true }
+  ],
+  "env": {
+    // Worker de teste "polo9n-preview" (npm run deploy:preview): só o endereço *.workers.dev, SEM as rotas
+    // do domínio. Bindings e vars não são herdados entre ambientes no wrangler, por isso se repetem aqui.
+    "preview": {
+      "name": "polo9n-preview",
+      "workers_dev": true,
+      "routes": [],
+      "version_metadata": { "binding": "CF_VERSION_METADATA" },
+      "vars": {
+        "SUPABASE_URL": "https://crzmyemggpgjcrwwuwka.supabase.co",
+        "SUPABASE_PUBLISHABLE_KEY": "sb_publishable_ymEIzdY3XwK_QJ85yAx2gQ_w33cCiRA"
+      }
+    }
+  }
+}

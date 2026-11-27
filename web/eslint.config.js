@@ -12,7 +12,8 @@ export default tseslint.config(
   js.configs.recommended,
   ...tseslint.configs.recommended,
   ...astro.configs.recommended,
-  ...astro.configs["jsx-a11y-recommended"],
+  // O preset "jsx-a11y-recommended" do eslint-plugin-astro registra o plugin jsx-a11y de novo (outra cópia),
+  // o que quebra o ESLint ("Cannot redefine plugin"). A acessibilidade fica coberta no bloco dos .ts/.tsx.
   {
     files: ["**/*.{ts,tsx}"],
     ...jsxA11y.flatConfigs.recommended,
@@ -25,5 +26,7 @@ export default tseslint.config(
     languageOptions: { globals: { ...globals.browser } },
   },
   { files: ["src/sw.ts"], languageOptions: { globals: { ...globals.serviceworker } } },
-  { files: ["*.mjs", "*.config.*"], languageOptions: { globals: { ...globals.node } } },
+  { files: ["*.mjs", "*.config.*", "scripts/**/*.mjs"], languageOptions: { globals: { ...globals.node } } },
+  // __BUILD_ID__ é uma constante injetada no build (define do Vite) e trocada pelo Worker pela versão do deploy.
+  { files: ["**/*.astro"], languageOptions: { globals: { __BUILD_ID__: "readonly" } } },
 );
