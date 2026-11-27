@@ -151,7 +151,8 @@ export async function planejar(db: SupabaseClient): Promise<Plano> {
 
   const porId = new Map(midias.map((m) => [m.id, m]));
   const semImagem: SemImagem[] = banco
-    .filter((p) => p.origem === "importado" && porId.has(p.ig_media_id))
+    // Qualquer origem: Reels publicados pelo bot também precisam de capa e vídeo na galeria para aparecer no site.
+    .filter((p) => porId.has(p.ig_media_id))
     .map((p) => ({
       m: porId.get(p.ig_media_id)!,
       drive: driveAtivo() && !p.drive_file_ids?.length,

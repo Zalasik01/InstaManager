@@ -58,6 +58,48 @@ self.addEventListener('message', function (event) {
   if (event.data && event.data.type === 'SKIP_WAITING') self.skipWaiting();
 });
 
+/* ---------- aviso de post novo (Web Push) ----------
+   O backend (notificarNovoPost) manda JSON: { title, body, url, image, tag }. Só aceita URL do próprio site. */
+function urlDoSite(u) {
+  try {
+    var x = new URL(String(u || '/'), self.location.origin);
+    return x.origin === self.location.origin || x.hostname === 'polo9n.com.br' ? x.href : self.location.origin + '/';
+  } catch (e) { return self.location.origin + '/'; }
+}
+
+self.addEventListener('push', function (event) {
+  var d = {};
+  try { d = event.data ? event.data.json() : {}; } catch (e) { d = { body: event.data ? event.data.text() : '' }; }
+  var titulo = typeof d.title === 'string' && d.title ? d.title : 'Post novo no @polo_9n4_12';
+  var opcoes = {
+    body: typeof d.body === 'string' ? d.body : '',
+    icon: '/img/icon-192.png',
+    badge: '/img/favicon-32.png',
+    tag: typeof d.tag === 'string' ? d.tag : 'post-novo',
+    data: { url: urlDoSite(d.url) }
+  };
+  if (typeof d.image === 'string' && /^https:\/\//.test(d.image)) opcoes.image = d.image;
+  event.waitUntil(self.registration.showNotification(titulo, opcoes));
+});
+
+self.addEventListener('notificationclick', function (event) {
+  event.notification.close();
+  var alvo = (event.notification.data && event.notification.data.url) || self.location.origin + '/';
+  event.waitUntil(
+    self.clients.matchAll({ type: 'window', includeUncontrolled: true }).then(function (lista) {
+      for (var i = 0; i < lista.length; i++) {
+        var c = lista[i];
+        if (new URL(c.url).origin === self.location.origin && 'focus' in c) {
+          // Já tem o site aberto: leva para o post (o app abre o visualizador pelo #post=) e foca.
+          return (c.navigate ? c.navigate(alvo).catch(function () { return c; }) : Promise.resolve(c))
+            .then(function (w) { return (w || c).focus(); });
+        }
+      }
+      return self.clients.openWindow ? self.clients.openWindow(alvo) : undefined;
+    })
+  );
+});
+
 function limitar(nomeCache, max) {
   return caches.open(nomeCache).then(function (cache) {
     return cache.keys().then(function (chaves) {

@@ -7,6 +7,7 @@ import { createClient } from "npm:@supabase/supabase-js@2";
 import { publicarPorTipo, type TipoPost } from "../_shared/instagram.ts";
 import { arquivarPostNoDrive } from "../_shared/arquivar.ts";
 import { enviarResumoPublicacao } from "../_shared/pospublicacao.ts";
+import { notificarNovoPost } from "../_shared/push.ts";
 
 const LIMITE_POR_EXECUCAO = 5;
 // Reel pode levar até ~90 s para o Instagram processar. Passado este tempo, não pega post novo:
@@ -124,7 +125,11 @@ Deno.serve(async (req) => {
         await enviarResumoPublicacao(db, post.chat_id, igId, post.id); // link, QR code e embed
         await db.rpc("registrar_usos_hashtags", { p_post_id: post.id }); // conta o uso de cada hashtag
         // arquivarPostNoDrive só trata JPEG: o vídeo do Reel fica no Storage `fotos` por enquanto (sem galeria/Drive).
-        if (tipo === "FEED") await arquivarPostNoDrive(db, post);
+        if (tipo === "FEED") {
+          await arquivarPostNoDrive(db, post); // cria a cópia pública (galeria) que o site mostra
+          // Aviso de post novo para quem ativou as notificações do site (falha aqui nunca derruba a publicação).
+          await notificarNovoPost(db, { id: post.id, legenda: post.legenda }).catch((e) => console.error("push:", e));
+        }
       }
     } catch (e) {
       const msg = (e as Error).message;

@@ -10,6 +10,7 @@ import { ehVideoPath, publicarPorTipo, type TipoPost } from "../_shared/instagra
 import { ajustarProporcao, detectarFormato } from "../_shared/midia.ts";
 import { arquivarPostNoDrive } from "../_shared/arquivar.ts";
 import { enviarResumoPublicacao } from "../_shared/pospublicacao.ts";
+import { notificarNovoPost } from "../_shared/push.ts";
 import { type Resultado, verificarIntegracoes } from "../_shared/status.ts";
 import { executar as executarSync, planejar as planejarSync } from "../_shared/sincronizar.ts";
 import { formatarHorario, horaPronta, interpretarHorario } from "../_shared/horario.ts";
@@ -559,7 +560,11 @@ async function publicarAgora(chat_id: number, post: any, tipo: TipoPost) {
     await enviarResumoPublicacao(db, chat_id, igId, postId); // link, QR code e embed
     await db.rpc("registrar_usos_hashtags", { p_post_id: postId }); // conta o uso de cada hashtag
     // arquivarPostNoDrive só trata JPEG: o vídeo do Reel fica no Storage `fotos` por enquanto (sem galeria/Drive).
-    if (tipo === "FEED") await arquivarPostNoDrive(db, post);
+    if (tipo === "FEED") {
+      await arquivarPostNoDrive(db, post); // cria a cópia pública (galeria) que o site mostra
+      // Aviso de post novo para quem ativou as notificações do site (falha aqui nunca derruba a publicação).
+      await notificarNovoPost(db, { id: postId, legenda: post.legenda }).catch((e) => console.error("push:", e));
+    }
   } catch (e) {
     await db.from("posts").update({
       status: "erro",

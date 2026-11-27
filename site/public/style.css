@@ -61,6 +61,14 @@ main { flex: 1; width: 100%; }
 .bio { grid-column: 1 / -1; margin: 0; }
 .bio strong { display: block; }
 .bio span { color: var(--muted); }
+/* aviso de post novo (Web Push): botão discreto abaixo da bio */
+.push { grid-column: 1 / -1; margin: -.25rem 0 0; }
+.push-btn { display: inline-flex; align-items: center; gap: .4rem; min-height: 44px; padding: 0 .2rem; background: none; border: 0; color: var(--muted); font-size: .85rem; font-weight: 600; cursor: pointer; }
+.push-btn svg { width: 1rem; height: 1rem; }
+.push-btn:hover { color: var(--fg); }
+.push-btn[aria-pressed="true"] { color: var(--accent); }
+.push-btn:disabled { opacity: .6; cursor: progress; }
+.push-dica { margin: 0 0 .2rem; color: var(--muted); font-size: .8rem; }
 .stats { grid-column: 1 / -1; list-style: none; margin: 0; padding: .9rem 0; display: flex; justify-content: space-around; border-top: 1px solid var(--line); }
 .stats li { text-align: center; }
 .stats b { display: block; font-size: 1.05rem; font-variant-numeric: tabular-nums; }
@@ -190,17 +198,31 @@ dialog.viewer::backdrop { background: rgba(0,0,0,.78); }
 .v-box { display: flex; flex-direction: column; width: 100%; height: 100vh; height: 100dvh; background: var(--bg); overflow: hidden; }
 .viewer[open] .v-box { animation: v-in .18s ease-out; }
 @keyframes v-in { from { opacity: 0; transform: scale(.97); } }
-.v-media { position: relative; order: 1; flex: none; width: 100%; background: #000; height: var(--mh); display: grid; place-items: center; touch-action: pan-y pinch-zoom; }
+.v-media { position: relative; order: 1; flex: none; width: 100%; background: #000; height: var(--mh); display: grid; place-items: center; }
 /* Mídia presa à caixa (absolute + inset 0): um vídeo vertical não estoura mais a altura e é sempre mostrado inteiro. */
-.v-media img, .v-media video { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: contain; display: block; }
+.v-media video { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: contain; display: block; }
+/* Carrossel: trilho com rolagem horizontal nativa e scroll-snap (o dedo arrasta a imagem e ela encaixa
+   sozinha, sem JS de gesto). snap-stop: always = um arrasto rápido passa só uma imagem por vez.
+   overscroll-behavior-x: contain = no fim do trilho o gesto não vira "voltar página" nem troca de post. */
+.v-track {
+  position: absolute; inset: 0; display: flex; overflow-x: auto; overflow-y: hidden;
+  scroll-snap-type: x mandatory; overscroll-behavior-x: contain; scrollbar-width: none;
+  touch-action: pan-x pan-y pinch-zoom; -webkit-overflow-scrolling: touch;
+}
+.v-track::-webkit-scrollbar { display: none; }
+.v-track:focus { outline: none; }
+.v-slide { position: relative; flex: 0 0 100%; width: 100%; height: 100%; scroll-snap-align: center; scroll-snap-stop: always; }
+.v-slide img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: contain; display: block; -webkit-user-drag: none; user-select: none; }
+.v-arrow:disabled { opacity: .3; cursor: default; }
 .v-media video { background: #000; }
 .v-media [hidden] { display: none !important; }
 .v-arrow, .z-arrow { position: absolute; z-index: 2; top: 50%; transform: translateY(-50%); }
 .v-arrow { display: none; }
 .v-prev { left: .5rem; }
 .v-next { right: .5rem; }
-.dots { position: absolute; bottom: .6rem; left: 0; right: 0; display: flex; justify-content: center; gap: .35rem; }
-.dots i { width: .4rem; height: .4rem; border-radius: 50%; background: rgba(255,255,255,.4); }
+.dots { position: absolute; bottom: .6rem; left: 0; right: 0; display: flex; justify-content: center; gap: .35rem; pointer-events: none; }
+.dots i { width: .4rem; height: .4rem; border-radius: 50%; background: rgba(255,255,255,.4); transition: background-color .15s ease, transform .15s ease; }
+.dots i.on { transform: scale(1.2); }
 .dots i.on { background: var(--accent); }
 /* O painel deixa de ser uma caixa própria: cabeçalho, legenda, ações e contador viram itens do .v-box e
    ganham a ordem do Instagram (cabeçalho, imagem, legenda rolável, ações fixas). */
@@ -213,6 +235,16 @@ dialog.viewer::backdrop { background: rgba(0,0,0,.78); }
 .chips { list-style: none; margin: 0 0 .9rem; padding: 0; display: flex; flex-wrap: wrap; gap: .4rem; }
 .chips li { padding: .15rem .6rem; border: 1px solid var(--line); border-radius: 999px; font-size: .82rem; color: var(--accent); }
 .v-date { color: var(--muted); font-size: .8rem; margin: 0 0 .5rem; }
+/* comentários do Instagram (dentro da área rolável, abaixo da legenda) */
+.v-com { margin: .9rem 0 .4rem; padding-top: .9rem; border-top: 1px solid var(--line); }
+.v-com-t { margin: 0 0 .7rem; font-size: .72rem; letter-spacing: .14em; text-transform: uppercase; color: var(--muted); }
+.v-com-lista { list-style: none; margin: 0; padding: 0; display: grid; gap: .75rem; }
+.v-com-lista li { font-size: .9rem; line-height: 1.4; overflow-wrap: anywhere; }
+.v-com-lista b { font-weight: 700; margin-right: .35rem; }
+.v-com-lista p { margin: 0; white-space: pre-line; }
+.v-com-meta { display: block; margin-top: .15rem; color: var(--muted); font-size: .75rem; }
+.v-com-vazio { margin: 0; color: var(--muted); font-size: .88rem; }
+.v-com.carregando .v-com-lista { min-height: 2.5rem; }
 .v-actions { order: 3; flex: none; display: flex; flex-wrap: wrap; gap: .5rem; align-items: center; padding: .6rem max(1rem, env(safe-area-inset-right)) .4rem max(1rem, env(safe-area-inset-left)); border-top: 1px solid var(--line); }
 .v-actions a { display: inline-flex; align-items: center; min-height: 44px; font-size: .9rem; }
 .v-count { order: 4; flex: none; margin: 0; padding: 0 max(1rem, env(safe-area-inset-right)) calc(.6rem + env(safe-area-inset-bottom)) max(1rem, env(safe-area-inset-left)); color: var(--muted); font-size: .75rem; }
@@ -259,6 +291,7 @@ footer a:hover { color: var(--fg); }
   .stats { grid-column: 2; grid-row: 2; border: 0; padding: 0; justify-content: flex-start; gap: 2.5rem; }
   .stats li { text-align: left; }
   .bio { grid-column: 2; grid-row: 3; }
+  .push { grid-column: 2; grid-row: 4; }
   .tabs { margin: 2rem 0 0; justify-content: center; }
   .tabs button { flex: 0 0 auto; padding: .9rem 2rem; }
   .grid { margin: 0; gap: 4px; }

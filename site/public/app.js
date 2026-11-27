@@ -302,31 +302,101 @@
     });
   }
 
-  /* ---------- visualizador ---------- */
+  /* ---------- visualizador ----------
+     Carrossel = trilho (#v-track) com uma imagem por "slide", rolagem horizontal nativa e scroll-snap:
+     o swipe é do próprio navegador (acompanha o dedo e encaixa), sem JS de gesto. O JS só acompanha a
+     rolagem para saber qual imagem está na tela (bolinhas, setas, texto alternativo) e rola o trilho
+     quando a troca vem das setas ou do teclado. Não dá a volta: no último item o swipe para ali.
+     Trocar de POST é só pelos botões laterais e pelo teclado (nunca por swipe). */
+  var trilhoPost = null; // post cujo trilho está montado (evita remontar ao só trocar de imagem)
+
+  function suave() {
+    return !(window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches);
+  }
+
+  function montarTrilho(p, imgs, s) {
+    var tr = $('v-track');
+    tr.textContent = '';
+    imgs.forEach(function (u, i) {
+      var sl = el('div', 'v-slide');
+      var im = el('img');
+      im.alt = 'Imagem ' + (i + 1) + ' de ' + imgs.length + (s.texto ? '. ' + resumo(p) : '. Foto do Polo 9n4');
+      im.width = 1080; im.height = 1080;
+      im.decoding = 'async';
+      im.draggable = false;
+      if (i === 0) {
+        // Proporção do Instagram: a 1ª imagem do post define a caixa (o carrossel inteiro segue ela).
+        im.addEventListener('load', function () {
+          var r = im.naturalWidth / im.naturalHeight;
+          p._cls = r <= 0.9 ? 'r-45' : r < 1.15 ? 'r-11' : r < 1.6 ? 'r-43' : 'r-191';
+          if (posts[atual] === p) proporcao(p._cls);
+        });
+      } else {
+        im.setAttribute('aria-hidden', 'true');
+      }
+      im.src = u;
+      sl.appendChild(im);
+      tr.appendChild(sl);
+    });
+    tr.scrollLeft = 0;
+    trilhoPost = p;
+  }
+
+  function proporcao(cls) {
+    var dlgV = $('viewer');
+    ['r-45', 'r-11', 'r-43', 'r-191'].forEach(function (c) { dlgV.classList.toggle(c, c === cls); });
+  }
+
+  /* Atualiza bolinhas, setas e acessibilidade para a imagem imgIdx (sem mexer na rolagem). */
+  function marcarImagem() {
+    var p = posts[atual];
+    var n = p && Array.isArray(p.imagens) ? p.imagens.length : 0;
+    var dots = $('v-dots').children;
+    for (var i = 0; i < dots.length; i++) dots[i].className = i === imgIdx ? 'on' : '';
+    $('v-iprev').disabled = imgIdx <= 0;
+    $('v-inext').disabled = imgIdx >= n - 1;
+    var sl = $('v-track').children;
+    for (var k = 0; k < sl.length; k++) {
+      var im = sl[k].firstChild;
+      if (im) { if (k === imgIdx) im.removeAttribute('aria-hidden'); else im.setAttribute('aria-hidden', 'true'); }
+    }
+  }
+
+  /* Qual imagem está na tela, a partir da rolagem do trilho. */
+  var rafTrilho = 0;
+  function aoRolarTrilho() {
+    if (rafTrilho) return;
+    rafTrilho = requestAnimationFrame(function () {
+      rafTrilho = 0;
+      var tr = $('v-track');
+      var w = tr.clientWidth;
+      if (!w || !tr.children.length) return;
+      var i = Math.max(0, Math.min(tr.children.length - 1, Math.round(tr.scrollLeft / w)));
+      if (i !== imgIdx) { imgIdx = i; marcarImagem(); }
+    });
+  }
+
+  function rolarPara(i, animar) {
+    var tr = $('v-track');
+    var w = tr.clientWidth;
+    if (!w) return;
+    try { tr.scrollTo({ left: i * w, behavior: animar && suave() ? 'smooth' : 'auto' }); } catch (e) { tr.scrollLeft = i * w; }
+  }
+
   function renderViewer() {
     var p = posts[atual];
     if (!p) return;
     var imgs = Array.isArray(p.imagens) ? p.imagens : [];
-    var multi = imgs.length > 1;
+    var multi = imgs.length > 1 && !p.video;
     var s = separar(p.legenda);
-    var im = $('v-img');
-    // Proporção do Instagram: a 1ª imagem do post define a caixa (o carrossel inteiro segue ela).
-    var dlgV = $('viewer');
-    var proporcao = function (cls) {
-      ['r-45', 'r-11', 'r-43', 'r-191'].forEach(function (c) { dlgV.classList.toggle(c, c === cls); });
-    };
+    var tr = $('v-track');
     proporcao(p._cls || 'r-45'); // padrão 4:5: evita salto de layout antes de a imagem carregar
-    im.onload = function () {
-      if (imgIdx !== 0 && p._cls) return;
-      var r = im.naturalWidth / im.naturalHeight;
-      p._cls = r <= 0.9 ? 'r-45' : r < 1.15 ? 'r-11' : r < 1.6 ? 'r-43' : 'r-191';
-      proporcao(p._cls);
-    };
-    im.src = imgs[imgIdx] || '';
     // Vídeo/Reel: toca o MP4 no lugar da imagem (a capa vira o poster).
     var vid = $('v-video');
     if (p.video) {
-      im.hidden = true;
+      tr.hidden = true;
+      tr.textContent = '';
+      trilhoPost = null;
       vid.hidden = false;
       vid.poster = imgs[0] || '';
       if (vid.getAttribute('src') !== p.video) vid.src = p.video;
@@ -336,19 +406,22 @@
         proporcao(p._cls);
       };
     } else {
-      im.hidden = false;
+      tr.hidden = false;
+      if (trilhoPost !== p) montarTrilho(p, imgs, s);
       vid.hidden = true;
-      vid.pause();
-      vid.removeAttribute('src');
-      vid.load();
+      if (vid.getAttribute('src')) {
+        vid.pause();
+        vid.removeAttribute('src');
+        vid.load();
+      }
     }
     $('v-expand').hidden = !!p.video;
-    im.alt = 'Imagem ' + (imgIdx + 1) + ' de ' + imgs.length + (s.texto ? '. ' + resumo(p) : '. Foto do Polo 9n4');
     $('v-iprev').hidden = !multi;
     $('v-inext').hidden = !multi;
     var dots = $('v-dots');
     dots.textContent = '';
-    if (multi) imgs.forEach(function (_, i) { dots.appendChild(el('i', i === imgIdx ? 'on' : '')); });
+    if (multi) imgs.forEach(function () { dots.appendChild(el('i')); });
+    marcarImagem();
     $('v-box').classList.toggle('compact', !s.texto && !s.tags.length);
     $('v-count').textContent = 'Post ' + (atual + 1) + ' de ' + (total || posts.length);
     var nn = numeros(p);
@@ -370,10 +443,13 @@
     if (ok) link.href = p.permalink;
     $('v-pprev').disabled = atual <= 0;
     $('v-pnext').disabled = atual >= posts.length - 1 && posts.length >= total;
+    $('v-scroll').scrollTop = 0;
+    carregarComentarios(p);
   }
 
   function abrir(i, origem) {
     atual = i; imgIdx = 0;
+    trilhoPost = null; // remonta o trilho do zero (começa na 1ª imagem)
     ultimoFoco = origem || document.activeElement;
     renderViewer();
     var dlg = $('viewer');
@@ -382,16 +458,26 @@
     $('v-close').focus();
   }
 
+  /* Imagem anterior/próxima do carrossel. Não dá a volta. Devolve false se já está na ponta. */
   function imagem(delta) {
-    var n = (posts[atual].imagens || []).length;
-    if (n < 2) return;
-    imgIdx = (imgIdx + delta + n) % n;
-    renderViewer();
+    var p = posts[atual];
+    var n = p && !p.video ? (p.imagens || []).length : 0;
+    if (n < 2) return false;
+    var alvo = Math.max(0, Math.min(n - 1, imgIdx + delta));
+    if (alvo === imgIdx) return false;
+    imgIdx = alvo;
+    marcarImagem();
+    // Com o zoom aberto por cima, o trilho troca sem animação (ninguém está vendo).
+    rolarPara(alvo, !$('zoom').open);
+    return true;
   }
 
   function post(delta) {
     var alvo = atual + delta;
     if (alvo < 0) return;
+    // O botão do lado que chegou na ponta fica desabilitado e perderia o foco: passa o foco para o Fechar.
+    var botao = delta < 0 ? $('v-pprev') : $('v-pnext');
+    if (document.activeElement === botao) setTimeout(function () { if (botao.disabled) $('v-close').focus(); }, 0);
     if (alvo >= posts.length) {
       if (posts.length >= total) return;
       carregar().then(function () { if (alvo < posts.length) { atual = alvo; imgIdx = 0; renderViewer(); } });
@@ -399,6 +485,74 @@
     }
     atual = alvo; imgIdx = 0;
     renderViewer();
+  }
+
+  /* ---------- comentários do Instagram (sob demanda, ao abrir o post) ---------- */
+  var cacheComentarios = {};
+  var pedidoComentarios = 0;
+
+  function dataRelativa(iso) {
+    var t = new Date(iso).getTime();
+    if (isNaN(t)) return '';
+    var s = Math.max(0, (Date.now() - t) / 1000);
+    if (s < 60) return 'agora';
+    if (s < 3600) return Math.floor(s / 60) + ' min';
+    if (s < 86400) return Math.floor(s / 3600) + ' h';
+    if (s < 7 * 86400) return Math.floor(s / 86400) + ' d';
+    if (s < 365 * 86400) return Math.floor(s / (7 * 86400)) + ' sem';
+    return new Date(t).toLocaleDateString('pt-BR', { day: 'numeric', month: 'short', year: 'numeric' });
+  }
+
+  function mostrarComentarios(lista) {
+    var sec = $('v-com'), ul = $('v-com-lista');
+    ul.textContent = '';
+    sec.classList.remove('carregando');
+    lista.slice(0, 20).forEach(function (c) {
+      var li = el('li');
+      var pp = el('p');
+      if (c.usuario) pp.appendChild(el('b', null, c.usuario));
+      pp.appendChild(document.createTextNode(String(c.texto || '')));
+      li.appendChild(pp);
+      var meta = [];
+      var quando = c.criado_em ? dataRelativa(c.criado_em) : '';
+      if (quando) meta.push(quando);
+      var cu = num(c.curtidas);
+      if (cu) meta.push(plural(cu, 'curtida', 'curtidas'));
+      if (meta.length) {
+        var m = el('span', 'v-com-meta', meta.join(' · '));
+        if (c.criado_em) m.title = formatarData(c.criado_em).txt;
+        li.appendChild(m);
+      }
+      ul.appendChild(li);
+    });
+    $('v-com-vazio').hidden = lista.length > 0;
+    sec.hidden = false;
+  }
+
+  function carregarComentarios(p) {
+    var sec = $('v-com');
+    var meu = ++pedidoComentarios;
+    var id = String(p.id);
+    if (cacheComentarios[id]) { mostrarComentarios(cacheComentarios[id]); return; }
+    sec.hidden = true;
+    $('v-com-lista').textContent = '';
+    var pedido;
+    if (DEMO) {
+      pedido = Promise.resolve({ comentarios: atual % 2 ? [] : [
+        { usuario: 'fulano.vw', texto: 'Que Polo lindo! Ficou top com as lanternas escurecidas.', curtidas: 3, criado_em: new Date(Date.now() - 3 * 3600e3).toISOString() },
+        { usuario: 'polo_clube', texto: 'Qual a medida das rodas?', curtidas: 0, criado_em: new Date(Date.now() - 9 * 86400e3).toISOString() }
+      ] });
+    } else if (!/^[0-9a-f-]{36}$/i.test(id)) {
+      return;
+    } else {
+      pedido = fetch('/api/comentarios?post=' + encodeURIComponent(id), { headers: { Accept: 'application/json' } })
+        .then(function (r) { if (!r.ok) throw new Error('comentarios ' + r.status); return r.json(); });
+    }
+    pedido.then(function (j) {
+      var lista = j && Array.isArray(j.comentarios) ? j.comentarios : [];
+      cacheComentarios[id] = lista;
+      if (meu === pedidoComentarios) mostrarComentarios(lista);
+    }).catch(function () { /* erro silencioso: a seção continua escondida */ });
   }
 
   function fecharViewer() {
@@ -629,6 +783,96 @@
     }
   }
 
+  /* ---------- aviso de post novo (Web Push) ----------
+     Botão discreto abaixo da bio. Só aparece se o navegador tem PushManager e a pessoa ainda não
+     bloqueou as notificações. A permissão é pedida SÓ no clique. A inscrição vai para /api/push
+     (o Worker grava no banco); quem envia é o backend, depois de publicar (notificarNovoPost).
+     No iPhone o PushManager só existe com o app instalado na tela de início: no Safari comum o botão
+     aparece e explica isso. VAPID_PUBLICA precisa ser do mesmo par do secret VAPID_PRIVATE_KEY. */
+  var VAPID_PUBLICA = 'BCzsffDs0rv-uaWO2Fa83HPsT6LHLRXOHAz-jErwjQQ08QzCWe6fbcYIqTH3en9YoL1XyqBRBbaKdx-vw__b0-w';
+
+  function chaveBytes(b64) {
+    var s = b64.replace(/-/g, '+').replace(/_/g, '/');
+    s += '===='.slice((s.length % 4) || 4);
+    var bin = atob(s), out = new Uint8Array(bin.length);
+    for (var i = 0; i < bin.length; i++) out[i] = bin.charCodeAt(i);
+    return out;
+  }
+
+  function enviarInscricao(metodo, sub) {
+    var j = sub.toJSON ? sub.toJSON() : sub;
+    var corpo = metodo === 'DELETE' ? { endpoint: j.endpoint } : { endpoint: j.endpoint, keys: j.keys };
+    return fetch('/api/push', {
+      method: metodo,
+      headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
+      body: JSON.stringify(corpo)
+    }).then(function (r) { if (!r.ok) throw new Error('push ' + r.status); });
+  }
+
+  function iniciarPush() {
+    var caixa = $('push'), btn = $('push-btn'), txt = $('push-txt'), dica = $('push-dica');
+    var ios = /iphone|ipad|ipod/i.test(navigator.userAgent) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
+    var temPush = 'serviceWorker' in navigator && 'PushManager' in window && 'Notification' in window;
+    var seguro = location.protocol === 'https:' || location.hostname === 'localhost' || location.hostname === '127.0.0.1';
+    if (!seguro || DEMO) return;
+
+    if (!temPush) {
+      // iPhone/iPad no Safari comum: só funciona instalado. Mostra o caminho em vez de esconder.
+      if (ios && !instalado()) {
+        caixa.hidden = false;
+        btn.addEventListener('click', function () { dica.hidden = !dica.hidden; });
+      }
+      return;
+    }
+    if (Notification.permission === 'denied') return; // a pessoa já decidiu: não insiste
+
+    var ativo = false;
+    function pintar() {
+      txt.textContent = ativo ? 'Desativar avisos' : 'Avisar novos posts';
+      btn.setAttribute('aria-pressed', String(ativo));
+    }
+
+    function registro() { return navigator.serviceWorker.ready; }
+
+    registro().then(function (reg) { return reg.pushManager.getSubscription(); }).then(function (sub) {
+      ativo = !!sub && Notification.permission === 'granted';
+      pintar();
+      caixa.hidden = false;
+    }).catch(function () { /* sem service worker: fica escondido */ });
+
+    btn.addEventListener('click', function () {
+      btn.disabled = true;
+      var acao;
+      if (ativo) {
+        acao = registro().then(function (reg) { return reg.pushManager.getSubscription(); }).then(function (sub) {
+          if (!sub) return;
+          var copia = sub.toJSON();
+          return sub.unsubscribe().then(function () { return enviarInscricao('DELETE', copia).catch(function () {}); });
+        }).then(function () { ativo = false; toast('Avisos desativados'); });
+      } else {
+        acao = Notification.requestPermission().then(function (perm) {
+          if (perm !== 'granted') {
+            if (perm === 'denied') caixa.hidden = true;
+            throw new Error('sem permissao');
+          }
+          return registro();
+        }).then(function (reg) {
+          return reg.pushManager.getSubscription().then(function (sub) {
+            return sub || reg.pushManager.subscribe({ userVisibleOnly: true, applicationServerKey: chaveBytes(VAPID_PUBLICA) });
+          });
+        }).then(function (sub) {
+          return enviarInscricao('POST', sub).catch(function (e) {
+            // O servidor não guardou: desfaz a inscrição local para o botão não mentir.
+            return sub.unsubscribe().catch(function () {}).then(function () { throw e; });
+          });
+        }).then(function () { ativo = true; toast('Pronto: você será avisado de posts novos'); });
+      }
+      acao.catch(function (e) {
+        if (!(e && e.message === 'sem permissao')) toast('Não deu para ativar os avisos agora');
+      }).then(function () { btn.disabled = false; pintar(); });
+    });
+  }
+
   /* ---------- ficha do carro ---------- */
   var ROTULOS = {
     modelo: 'Modelo', ano: 'Ano', geracao: 'Geração', cor: 'Cor', versao: 'Versão', motor: 'Motor', cambio: 'Câmbio',
@@ -794,21 +1038,24 @@
     $('v-inext').addEventListener('click', function () { imagem(1); });
     $('v-pprev').addEventListener('click', function () { post(-1); });
     $('v-pnext').addEventListener('click', function () { post(1); });
-    dlg.addEventListener('keydown', function (e) {
+    // Teclado: com carrossel, as setas trocam a imagem; na ponta do carrossel (ou sem carrossel), trocam o post.
+    // No document (não só no diálogo): se o botão focado fica desabilitado, o foco cai no body e as setas seguem valendo.
+    document.addEventListener('keydown', function (e) {
+      if (!dlg.open || $('zoom').open) return;
       if (e.key !== 'ArrowLeft' && e.key !== 'ArrowRight') return;
+      if (e.altKey || e.ctrlKey || e.metaKey) return;
+      if (e.target && e.target.tagName === 'VIDEO') return; // setas do vídeo avançam/voltam o vídeo
       e.preventDefault();
       var d = e.key === 'ArrowRight' ? 1 : -1;
-      if ((posts[atual].imagens || []).length > 1) imagem(d); else post(d);
+      if (!imagem(d)) post(d);
     });
-    var x0 = null;
-    dlg.addEventListener('touchstart', function (e) { x0 = e.touches[0].clientX; }, { passive: true });
-    dlg.addEventListener('touchend', function (e) {
-      if (x0 == null) return;
-      var dx = e.changedTouches[0].clientX - x0;
-      x0 = null;
-      if (Math.abs(dx) < 60) return;
-      if ((posts[atual].imagens || []).length > 1) imagem(dx < 0 ? 1 : -1); else post(dx < 0 ? 1 : -1);
-    }, { passive: true });
+    // Swipe: é a rolagem nativa do trilho (scroll-snap). Aqui só se acompanha qual imagem ficou na tela.
+    var trilho = $('v-track');
+    trilho.addEventListener('scroll', aoRolarTrilho, { passive: true });
+    window.addEventListener('resize', function () {
+      // Girar o celular muda a largura: mantém a mesma imagem encaixada.
+      if (dlg.open && !trilho.hidden) rolarPara(imgIdx, false);
+    });
 
     carregarCarro();
     if (location.hash === '#carro') aba('carro');
@@ -816,6 +1063,7 @@
     else if (location.hash === '#posts') { aba('posts'); $('tab-posts').scrollIntoView(); }
     registrarSW();
     iniciarInstalacao();
+    iniciarPush();
     carregarPerfil();
     carregar().then(function () { var id = idDoHash(); if (id) abrirPorId(id, 1); });
   }

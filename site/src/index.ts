@@ -1,5 +1,7 @@
 // Worker do site polo9n.com.br.
 // - /api/posts  -> lê os posts públicos no Supabase (função listar_posts_publicos) e devolve JSON.
+// - /api/comentarios?post=<uuid> -> comentários do Instagram do post (listar_comentarios_publicos).
+// - /api/push (POST/DELETE) -> inscreve/cancela o aviso de post novo (inscrever_push/cancelar_push).
 // - qualquer outra rota -> arquivos estáticos de ./public (binding ASSETS).
 //
 // Só usa a chave PUBLISHABLE do Supabase, que é pública por desenho. As tabelas têm RLS sem política:
@@ -100,6 +102,81 @@ async function perfil(env: Env): Promise<Response> {
   }
 }
 
+const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+type ComentarioRpc = { usuario: string | null; texto: string | null; curtidas: number | null; criado_em: string | null };
+
+/** Comentários do Instagram de um post (copiados para o banco a cada 3 horas pela função coletar-comentarios). */
+async function comentarios(url: URL, env: Env): Promise<Response> {
+  const post = url.searchParams.get("post") ?? "";
+  if (!UUID.test(post)) return json({ erro: "post inválido" }, 400);
+  try {
+    const lista = await rpc<ComentarioRpc[]>(env, "listar_comentarios_publicos", { p_post_id: post, p_limite: 20 });
+    return json(
+      {
+        comentarios: lista.map((c) => ({
+          usuario: c.usuario ?? "",
+          texto: c.texto ?? "",
+          curtidas: c.curtidas,
+          criado_em: c.criado_em,
+        })),
+      },
+      200,
+      // A coleta roda a cada 3 horas: 5 minutos de cache não atrasam nada e poupam o banco.
+      "public, max-age=300, s-maxage=300",
+    );
+  } catch {
+    return json({ erro: "Não consegui carregar os comentários agora." }, 502);
+  }
+}
+
+const B64URL = /^[A-Za-z0-9_-]+={0,2}$/;
+
+/**
+ * Inscrição de Web Push (aviso de post novo).
+ * POST   /api/push  { endpoint, keys: { p256dh, auth } } -> inscrever_push
+ * DELETE /api/push  { endpoint }                          -> cancelar_push
+ * Valida aqui o básico (corpo pequeno, endpoint https, chaves base64url); o banco valida de novo e limita o total.
+ */
+async function push(request: Request, env: Env): Promise<Response> {
+  if (request.method !== "POST" && request.method !== "DELETE") return json({ erro: "método não permitido" }, 405);
+  if (!(request.headers.get("content-type") ?? "").includes("application/json")) return json({ erro: "envie JSON" }, 415);
+  // Só aceita pedidos do próprio site (o navegador sempre manda Origin em POST/DELETE com fetch).
+  const origem = request.headers.get("origin");
+  if (origem && origem !== new URL(request.url).origin) return json({ erro: "origem não permitida" }, 403);
+
+  const texto = await request.text();
+  if (texto.length > 4096) return json({ erro: "corpo grande demais" }, 413);
+  let corpo: { endpoint?: unknown; keys?: { p256dh?: unknown; auth?: unknown } };
+  try {
+    corpo = JSON.parse(texto);
+  } catch {
+    return json({ erro: "JSON inválido" }, 400);
+  }
+  const endpoint = typeof corpo?.endpoint === "string" ? corpo.endpoint : "";
+  let endpointOk = false;
+  try {
+    endpointOk = endpoint.length <= 1000 && new URL(endpoint).protocol === "https:";
+  } catch { /* endpoint inválido */ }
+  if (!endpointOk) return json({ erro: "endpoint inválido" }, 400);
+
+  try {
+    if (request.method === "DELETE") {
+      await rpc<boolean>(env, "cancelar_push", { p_endpoint: endpoint });
+      return json({ ok: true });
+    }
+    const p256dh = typeof corpo.keys?.p256dh === "string" ? corpo.keys.p256dh : "";
+    const auth = typeof corpo.keys?.auth === "string" ? corpo.keys.auth : "";
+    if (!B64URL.test(p256dh) || p256dh.length > 100 || !B64URL.test(auth) || auth.length > 32) {
+      return json({ erro: "chaves inválidas" }, 400);
+    }
+    await rpc<boolean>(env, "inscrever_push", { p_endpoint: endpoint, p_p256dh: p256dh, p_auth: auth });
+    return json({ ok: true }, 201);
+  } catch {
+    return json({ erro: "Não deu para salvar a inscrição agora." }, 502);
+  }
+}
+
 const versaoDoApp = (env: Env) => (env.CF_VERSION_METADATA?.id ?? "dev").slice(0, 8);
 
 /**
@@ -150,13 +227,17 @@ export default {
       return Response.redirect(url.toString(), 301);
     }
 
-    const api = url.pathname === "/api/posts" || url.pathname === "/api/perfil";
-    const resposta = api && request.method !== "GET"
+    const api = url.pathname === "/api/posts" || url.pathname === "/api/perfil" || url.pathname === "/api/comentarios";
+    const resposta = url.pathname === "/api/push"
+      ? await push(request, env)
+      : api && request.method !== "GET"
       ? json({ erro: "método não permitido" }, 405)
       : url.pathname === "/api/posts"
       ? await posts(url, env)
       : url.pathname === "/api/perfil"
       ? await perfil(env)
+      : url.pathname === "/api/comentarios"
+      ? await comentarios(url, env)
       : url.pathname === "/version.json"
       ? json({ versao: versaoDoApp(env) }, 200, "no-store")
       : await estatico(request, env);

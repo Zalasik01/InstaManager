@@ -124,6 +124,10 @@
         <li id="st-desde-li" hidden><b id="st-desde"></b><span>desde</span></li>
       </ul>
       <p class="bio"><strong>VW Polo 2012 &middot; 9n4</strong><span>Branco, película escura e lanternas escurecidas. Um Polo cuidado por um entusiasta.</span></p>
+      <div class="push" id="push" hidden>
+        <button type="button" class="push-btn" id="push-btn" aria-pressed="false"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 8a6 6 0 0 1 12 0c0 7 3 9 3 9H3s3-2 3-9M10.3 21a1.94 1.94 0 0 0 3.4 0"/></svg><span id="push-txt">Avisar novos posts</span></button>
+        <p class="push-dica" id="push-dica" hidden>No iPhone, os avisos só funcionam com o app instalado: toque em Compartilhar e depois em Adicionar à Tela de Início.</p>
+      </div>
     </section>
 
     <div class="tabs" role="tablist" aria-label="Seções do perfil">
@@ -160,8 +164,8 @@
     </button>
     <div class="v-box" id="v-box">
       <div class="v-media">
-        <img id="v-img" alt="" width="1080" height="1080">
-<video id="v-video" controls playsinline preload="metadata" hidden></video>
+        <div class="v-track" id="v-track" role="group" aria-roledescription="carrossel" aria-label="Imagens do post" tabindex="-1"></div>
+        <video id="v-video" controls playsinline preload="metadata" hidden></video>
         <button type="button" class="icon-btn v-arrow v-prev" id="v-iprev" aria-label="Imagem anterior">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M15 5l-7 7 7 7"/></svg>
     </button>
@@ -172,11 +176,16 @@
       </div>
       <div class="v-info">
         <div class="v-top"><img class="v-av" src="/img/icon-192.png" alt="" width="32" height="32"><b>@polo_9n4_12</b></div>
-        <div class="v-scroll">
+        <div class="v-scroll" id="v-scroll">
           <p class="v-nums" id="v-nums"></p>
           <p class="v-cap" id="v-cap"></p>
           <ul class="chips" id="v-chips" aria-label="Hashtags"></ul>
           <p class="v-date"><time id="v-date"></time></p>
+          <section class="v-com" id="v-com" aria-labelledby="v-com-t" hidden>
+            <h2 class="v-com-t" id="v-com-t">Comentários</h2>
+            <ul class="v-com-lista" id="v-com-lista"></ul>
+            <p class="v-com-vazio" id="v-com-vazio" hidden>Nenhum comentário ainda.</p>
+          </section>
         </div>
         <div class="v-actions">
           <button type="button" class="share" id="v-share">Compartilhar</button>
