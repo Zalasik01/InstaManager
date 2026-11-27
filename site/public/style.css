@@ -83,7 +83,7 @@ main { flex: 1; width: 100%; }
 .tile { display: block; width: 100%; height: 100%; padding: 0; border: 0; background: none; cursor: pointer; position: relative; }
 .tile img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: contain; display: block; }
 /* Foto inteira (sem corte) sobre ela mesma desfocada, para preencher o que sobra do 4:5. */
-.tile img.bg { object-fit: cover; filter: blur(18px) saturate(1.1); transform: scale(1.2); }
+.tile img.bg { object-fit: cover; filter: blur(28px) saturate(1.35) brightness(.72); transform: scale(1.5); }
 .tile { touch-action: manipulation; -webkit-touch-callout: none; }
 .skel-i { animation: pulse 1.4s ease-in-out infinite; }
 .tile:hover img { opacity: .85; }
@@ -123,7 +123,7 @@ main { flex: 1; width: 100%; }
 .tile img { opacity: 0; transition: opacity .45s ease, transform .6s cubic-bezier(.2, .7, .2, 1); }
 .tile.pronto img { opacity: 1; }
 .tile img.bg { opacity: 0; }
-.tile.pronto img.bg { opacity: .55; }
+.tile.pronto img.bg { opacity: 1; }
 .tile.carregando, .grid li.skel-i {
   background: linear-gradient(100deg, var(--surface) 30%, #242428 50%, var(--surface) 70%) 0 0 / 200% 100%;
   animation: shimmer 1.4s linear infinite;
@@ -191,7 +191,8 @@ dialog.viewer::backdrop { background: rgba(0,0,0,.78); }
 .viewer[open] .v-box { animation: v-in .18s ease-out; }
 @keyframes v-in { from { opacity: 0; transform: scale(.97); } }
 .v-media { position: relative; order: 1; flex: none; width: 100%; background: #000; height: var(--mh); display: grid; place-items: center; touch-action: pan-y pinch-zoom; }
-.v-media img, .v-media video { width: 100%; height: 100%; object-fit: contain; display: block; }
+/* Mídia presa à caixa (absolute + inset 0): um vídeo vertical não estoura mais a altura e é sempre mostrado inteiro. */
+.v-media img, .v-media video { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: contain; display: block; }
 .v-media video { background: #000; }
 .v-media [hidden] { display: none !important; }
 .v-arrow, .z-arrow { position: absolute; z-index: 2; top: 50%; transform: translateY(-50%); }
